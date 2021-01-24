@@ -19,9 +19,11 @@ def getAccessToken():
     api_key = cfg.get("tokens", "api_key")
     secret_key = cfg.get("tokens", "secret_key")
 
+    # kiteurl = https://kite.trade/connect/login?v=3&api_key=
     strURL = cfg.get("info", "KiteURL") + api_key
     strUID = cfg.get("info", "UID")
     strPwd = cfg.get("info", "PWD")
+    # chromedriverpath = D:\Python\chromedriver\chromedriver.exe
     strChrmDrvrPath = cfg.get("info", "ChromeDriverPath")
 
     #Find Request Token
