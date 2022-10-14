@@ -1,3 +1,4 @@
+# This login approach is discontinued by Zerodha, Still the code can be referenced for programming learnings
 #import requests
 import configparser
 from kiteconnect import KiteConnect
