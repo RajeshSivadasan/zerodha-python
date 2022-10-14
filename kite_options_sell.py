@@ -19,6 +19,11 @@
 # Long Bias  : When Nifty/Call opens above r1
 # Short Bias : When Nifty/Call opens below  Pivot. 
 
+
+# Strategy 0:
+# Instead of Pivot point levels, use (open -  close) to see the % rise or fall and decide bias and 20/30/40/50 pts entry targets
+# So no need for getting historic data and all. 
+
 # Strategy 1 (Neutral Bias/Small Short Bias): Sell Both Call and Put at 10:08 AM of strike around 150  
 # Entry Criteria    : Entry post 10:30 AM to 12;
 # If crossed R3 sell next strike
@@ -69,6 +74,8 @@ totp_key = cfg.get("tokens", "totp_key")
 
 nifty_opt_ce_max_price_limit = int(cfg.get("info", "nifty_opt_ce_max_price_limit"))
 nifty_opt_pe_max_price_limit = int(cfg.get("info", "nifty_opt_pe_max_price_limit"))
+
+interval = int(cfg.get("info", "interval"))   #3min, 5min, 10min ...
 
 #List of thursdays when its NSE holiday
 weekly_expiry_holiday_dates = cfg.get("info", "weekly_expiry_holiday_dates").split(",")
@@ -195,8 +202,6 @@ def getOption():
 
 
 
-
-
 # Get current tradable Option details. Can be used during anytime of the day   
 getOption()
 
@@ -205,6 +210,24 @@ getOption()
 # Place 
 
 ######## Strategy 2: Sell CE at pivot resistance points , R2(qty=baselot) , R3(qty=baselot*2), R3(qty=baselot*3)
+
+while True:
+    # Process as per start of market timing
+    cur_HHMM = int(datetime.datetime.now().strftime("%H%M"))
+    if cur_HHMM > 914:
+        cur_min = datetime.datetime.now().minute 
+
+        # Below if block will run after every time interval specifie in the .ini file
+        if( cur_min % interval == 0 and flg_min != cur_min):
+            flg_min = cur_min     # Set the minute flag to run the code only once post the interval
+            t1 = time.time()      # Set timer to record the processing time of all the indicators
+
+        if cur_HHMM > 1530 and cur_HHMM < 1532 :   # Exit the program post NSE closure
+            print("Shutting down Algo at",datetime.datetime.now())
+            sys.exit()
+
+    time.sleep(10)   # reduce to accomodate the processing delay, if any
+
 
 print("====== Done ======", datetime.datetime.now())
 
