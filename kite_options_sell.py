@@ -2,6 +2,10 @@
 # To get a list of latest instruments as csv dump, type in browser the below url:
 # https://api.kite.trade/instruments
 
+
+# Script to be scheduled at 9:14 AM IST
+# Can run premarket advance and decline check to find the market sentiment
+#  
 ###### STRATEGY / TRADE PLAN #####
 # Trading Style     : Intraday. Positional if MTM is negative.
 # Trade Timing      : Entry: Morning 10:30 to 12:00 AM , After noon 1.30 PM to 3.30 PM 
@@ -41,6 +45,7 @@
 
 
 
+from operator import truediv
 import pyotp
 from kiteext import KiteExt
 import time
@@ -74,7 +79,8 @@ totp_key = cfg.get("tokens", "totp_key")
 
 nifty_opt_ce_max_price_limit = int(cfg.get("info", "nifty_opt_ce_max_price_limit"))
 nifty_opt_pe_max_price_limit = int(cfg.get("info", "nifty_opt_pe_max_price_limit"))
-
+short_strangle_time = int(cfg.get("info", "short_strangle_time"))
+short_strangle_flag = False
 interval = int(cfg.get("info", "interval"))   #3min, 5min, 10min ...
 
 #List of thursdays when its NSE holiday
@@ -175,7 +181,7 @@ def getOption():
     to_date = datetime.date.today()-datetime.timedelta(days=1)
     df_hist_ce = pd.DataFrame(kite.historical_data(instrument_token_ce,from_date,to_date,'day'))
 
-    print(f"Previous day OHLC for {instrument_token_ce}:")
+    print(f"Previous day OHLC for {instrument_nifty_opt_ce.symbol[-1]}:")
     print(df_hist_ce.iloc[-1])  #Previous days ohlc data
 
 
@@ -197,8 +203,27 @@ def getOption():
     # nifty_opt_ce_open = kite.ohlc(instrument_token_ce)[str(instrument_token_ce)]['ohlc']['open']
     # nifty_opt_ce_gap_updown = nifty_opt_ce_open - nifty_opt_ce_last_close
 
-    print(f"Pivot Points for {instrument_token_ce}:")
+    print(f"Pivot Points for {instrument_nifty_opt_ce.symbol[-1]}:")
     print(nifty_opt_ce_pp,nifty_opt_ce_r1,nifty_opt_ce_r2,nifty_opt_ce_r3,nifty_opt_ce_r4)
+
+def runShortStrangle():
+    '''Runs short strangle at a given price range'''
+
+def place_order(symbol,qty):
+    try:
+        order_id = kite.place_order(variety=kite.VARIETY_REGULAR,
+                            exchange=kite.EXCHANGE_NFO,
+                            tradingsymbol=symbol,
+                            transaction_type=kite.TRANSACTION_TYPE_SELL,
+                            quantity=qty,
+                            product=kite.PRODUCT_NRML,
+                            order_type=kite.ORDER_TYPE_LIMIT ,
+                            
+                            validity=kite.VALIDITY_DAY)
+        print(f"Order Placed. order_id={order_id}")
+    except Exception as e:
+        print(f"{e}")
+
 
 
 
@@ -210,42 +235,34 @@ getOption()
 # Place 
 
 ######## Strategy 2: Sell CE at pivot resistance points , R2(qty=baselot) , R3(qty=baselot*2), R3(qty=baselot*3)
+cur_HHMM = int(datetime.datetime.now().strftime("%H%M"))
 
-while True:
-    # Process as per start of market timing
+print("Done")
+sys.exit()
+
+# Process as per start and end of market timing
+while cur_HHMM > 914 and cur_HHMM < 1532:
+# while True:
+
+    
+    cur_min = datetime.datetime.now().minute 
+
+    # Below if block will run after every time interval specifie in the .ini file. Used fo OHLC calculation if needed
+    if( cur_min % interval == 0 and flg_min != cur_min):
+        flg_min = cur_min     # Set the minute flag to run the code only once post the interval
+        t1 = time.time()      # Set timer to record the processing time of all the indicators
+
+    # Run short strangle strategy
+    if (cur_HHMM > short_strangle_time & short_strangle_flag == False):
+        short_strangle_flag = True
+        print("In Short Strangle condition.")
+
+
+
     cur_HHMM = int(datetime.datetime.now().strftime("%H%M"))
-    if cur_HHMM > 914:
-        cur_min = datetime.datetime.now().minute 
-
-        # Below if block will run after every time interval specifie in the .ini file
-        if( cur_min % interval == 0 and flg_min != cur_min):
-            flg_min = cur_min     # Set the minute flag to run the code only once post the interval
-            t1 = time.time()      # Set timer to record the processing time of all the indicators
-
-        if cur_HHMM > 1530 and cur_HHMM < 1532 :   # Exit the program post NSE closure
-            print("Shutting down Algo at",datetime.datetime.now())
-            sys.exit()
 
     time.sleep(10)   # reduce to accomodate the processing delay, if any
 
 
 print("====== Done ======", datetime.datetime.now())
 
-''' 
-kws = kite.kws()
-# Got from kite_options_sell.py
-
-try:
-    kite.place_order(variety=kite.VARIETY_REGULAR,
-                        exchange=kite.EXCHANGE_NFO,
-                        tradingsymbol=symbol,
-                        transaction_type=kite.TRANSACTION_TYPE_SELL,
-                        quantity=list(df["lot_size"])[0],
-                        product=kite.PRODUCT_MIS,
-                        order_type=kite.ORDER_TYPE_MARKET,
-                        validity=kite.VALIDITY_DAY)
-    print("Order Placed")
-except Exception as e:
-    print(f"{e}")
-
-'''
