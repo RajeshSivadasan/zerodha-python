@@ -5,4 +5,4 @@ I have tried some sample programs to capture tick data using Zerodha Kite API. P
 2. Kite_getTicks - Gets daily tick data and store in sqlite database<br>
 3. getAccess_token.py - (Discontinued) Gets access token from the kite url https://kite.trade/connect/login?v=3&api_key=  
 4. GetInstrumentsDaily - Gets daily NSE instruments data through Zerodha Kite API<br>
-5. kite_options_sell.py - Option Selling program based on Mean Reversion approach (wip)
+5. kite_options_sell.py - Option Selling program based on Mean Reversion approach (wip). Please ensure that you have a working kite extension file (shared in a algo self help Telegram group https://t.me/AlgoTradeAnalysis ) 
