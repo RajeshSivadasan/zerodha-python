@@ -7,7 +7,7 @@
 # Can run premarket advance and decline check to find the market sentiment
 #  
 ###### STRATEGY / TRADE PLAN #####
-# Trading Style     : Intraday. Positional if MTM is negative.
+# Trading Style     : Intraday. Positional if MTM is negative(Use Mean reversion)
 # Trade Timing      : Entry: Morning 10:30 to 12:00 AM , After noon 1.30 PM to 3.30 PM 
 # Trading Capital   : Rs 6,60,000 approx to start with
 # Script            : Nifty Options
@@ -17,7 +17,7 @@
 # Time Frame        : 1 min
  
 # Risk Capacity     : <>
-# Order Management  : BO orders else MIS/Normal(may need additional exit criteria)
+# Order Management  : 
 
 # Long or Short Bias decision:
 # Long Bias  : When Nifty/Call opens above r1
@@ -43,9 +43,8 @@
 
 # Exit Criteria    : Book 75% of Qty at 1% of Margin used (Rs 1200 per lot) or 75% at first support if profit is above
 
-
-
 from operator import truediv
+from traceback import print_tb
 import pyotp
 from kiteext import KiteExt
 import time
@@ -62,12 +61,13 @@ if not os.path.exists("./log"):
     os.makedirs("./log")
 # Initialise logging and set console and error target as log file
 LOG_FILE = r"./log/kite_options_sell_" + datetime.datetime.now().strftime("%Y%m%d") +".log"
-# sys.stdout = sys.stderr = open(LOG_FILE, "a")
+sys.stdout = sys.stderr = open(LOG_FILE, "a") # use flush=True parameter in print statement if values are not seen in log file
+print(f"Logging to file :{LOG_FILE}",flush=True)
 
 
-
-# Initialise Variables/parameters
-# -------------------------------
+########################################################
+#        Initialise Variables/parameters
+########################################################
 # Read parameters and settings from the .ini file
 INI_FILE = "kite_options_sell.ini"
 cfg = configparser.ConfigParser()
@@ -82,6 +82,13 @@ nifty_opt_pe_max_price_limit = int(cfg.get("info", "nifty_opt_pe_max_price_limit
 short_strangle_time = int(cfg.get("info", "short_strangle_time"))
 short_strangle_flag = False
 interval = int(cfg.get("info", "interval"))   #3min, 5min, 10min ...
+profit_target_perc = float(cfg.get("info", "profit_target_perc"))  # profit target percentage of the utilised margin
+loss_limit_perc = float(cfg.get("info", "loss_limit_perc"))
+
+print(f"profit_target_perc={profit_target_perc}, loss_limit_perc={loss_limit_perc}")
+
+
+
 
 #List of thursdays when its NSE holiday
 weekly_expiry_holiday_dates = cfg.get("info", "weekly_expiry_holiday_dates").split(",")
@@ -131,6 +138,11 @@ nifty_olhc = kite.ohlc(instruments[0])
 
 instrument_nifty_opt_ce = ""
 instrument_nifty_opt_pe = ""
+
+
+########################################################
+#        Declare Functions
+########################################################
 
 def getOption():
     '''
@@ -208,24 +220,103 @@ def getOption():
 
 def runShortStrangle():
     '''Runs short strangle at a given price range'''
+    # Have to rethink about this strategy
 
-def place_order(symbol,qty):
+def place_order(symbol,qty,transaction_type=kite.TRANSACTION_TYPE_SELL,order_type=kite.ORDER_TYPE_LIMIT,limit_price=None,tag=None):
     try:
         order_id = kite.place_order(variety=kite.VARIETY_REGULAR,
                             exchange=kite.EXCHANGE_NFO,
                             tradingsymbol=symbol,
-                            transaction_type=kite.TRANSACTION_TYPE_SELL,
+                            transaction_type=transaction_type,
                             quantity=qty,
                             product=kite.PRODUCT_NRML,
-                            order_type=kite.ORDER_TYPE_LIMIT ,
-                            
-                            validity=kite.VALIDITY_DAY)
+                            order_type=order_type,
+                            price=limit_price,
+                            validity=kite.VALIDITY_DAY,
+                            tag=tag
+                            )
+
         print(f"Order Placed. order_id={order_id}")
     except Exception as e:
-        print(f"{e}")
+        print(f"place_order(): Error placing order. {e}")
+
+def process_orders():
+    '''Check the status of orders/squareoff/add positions'''
+    # kite.order_history()
+    # kite.order_margins()
+    # kite.order_trades()
+    # kite.orders()
+    print("In process_orders():")
+    mtm = 0
+    pos = 0
+    df_pos = get_positions()
+    # print("df_pos=",df_pos)
+    if df_pos.empty:
+        print("No Positions found.")
+    else:
+
+        mtm , pos = df_pos   # Get MTM and Net Positon
+        
+        if abs(pos)>0:
+            net_margin_utilised = round(pd.DataFrame(kite.margins()).equity.utilised.get('debits')) 
+            profit_target = round(net_margin_utilised * (profit_target_perc/100))
+            print(f"mtm={mtm}, pos={pos}, profit_target={profit_target}")
+            
+            if mtm > profit_target:
+                # Squareoff 80% (In Case of Large Qtys) of the positions 
+                print("Squareoff")
+                df_SqOff = pd.DataFrame(kite.positions().get('net'))[['tradingsymbol','m2m','quantity']]
+                for indx in df_SqOff.index:
+                    symbol = df_SqOff['tradingsymbol'][indx]
+                    qty = df_SqOff['quantity'][indx] * -1
+                    print(f"Placing Squareoff order for symbol={symbol},qty={qty}")
+                    place_order(symbol,qty,kite.TRANSACTION_TYPE_BUY,kite.ORDER_TYPE_MARKET,None,"Algo")
+
+                print("All Positions Squared Off. Exiting Algo...")
+                exit_algo()
+            else:
+                # Check if loss needs to be booked
+                if abs(round((mtm / net_margin_utilised)*100,1)) > loss_limit_perc:
+                    print("Book Loss")
+        
+        else:
+            print("No Active Positions Found")
 
 
+def get_positions():
+    '''Returns dataframe columns (m2m,quantity) with net values'''
+    print("In get_positions():")
 
+    # Calculae mtm manually
+    # pd.DataFrame(kite.positions().get('net'))[['tradingsymbol','sell_price']]
+
+    try:
+        return pd.DataFrame(kite.positions().get('net'))[['m2m','quantity']].sum()
+    except Exception as ex:
+        print(f"Unable to fetch positions(m2m and qty) dataframe. Error : {ex}")
+        return pd.DataFrame()
+
+
+def exit_algo(): 
+    print("In exit_algo():")
+    # Reset stdout and std error
+    sys.stdout = sys.__stdout__
+    sys.stderr = sys.__stderr__
+    sys.exit(0)
+
+#######################
+######   TESTING   ####
+
+# symbol='NIFTY22OCT17600CE'
+# qty=50
+# limit_price=300.0
+# tag='STRADDLE_ORD'
+
+# order_id=kite.place_order(variety=kite.VARIETY_REGULAR,exchange=kite.EXCHANGE_NFO,tradingsymbol=symbol,
+#     transaction_type=kite.TRANSACTION_TYPE_SELL,quantity=qty,
+#     product=kite.PRODUCT_NRML,order_type=kite.ORDER_TYPE_LIMIT,price=limit_price,validity=kite.VALIDITY_DAY,tag=tag)
+
+# print(f"Order Placed. order_id={order_id}")
 
 # Get current tradable Option details. Can be used during anytime of the day   
 getOption()
@@ -236,33 +327,47 @@ getOption()
 
 ######## Strategy 2: Sell CE at pivot resistance points , R2(qty=baselot) , R3(qty=baselot*2), R3(qty=baselot*3)
 cur_HHMM = int(datetime.datetime.now().strftime("%H%M"))
+previous_min = 0
+print(f"cur_HHMM={cur_HHMM}")
 
-print("Done")
-sys.exit()
+
+exit_algo()
 
 # Process as per start and end of market timing
-while cur_HHMM > 914 and cur_HHMM < 1532:
+while cur_HHMM > 914 and cur_HHMM < 1832:
 # while True:
 
     
     cur_min = datetime.datetime.now().minute 
-
+    
+    print(f"cur_min={cur_min}",flush=True)
     # Below if block will run after every time interval specifie in the .ini file. Used fo OHLC calculation if needed
-    if( cur_min % interval == 0 and flg_min != cur_min):
+    if( cur_min % interval == 0 and previous_min != cur_min):
         flg_min = cur_min     # Set the minute flag to run the code only once post the interval
         t1 = time.time()      # Set timer to record the processing time of all the indicators
 
-    # Run short strangle strategy
-    if (cur_HHMM > short_strangle_time & short_strangle_flag == False):
-        short_strangle_flag = True
-        print("In Short Strangle condition.")
+        process_orders()
+
+        # Find processing time and Log only if processing takes more than 2 seconds
+        t2 = time.time() - t1
+        print(f"t2={t2:.2f}")
+        if t2 > 2.0: 
+            print(f"Processing time(secs)= {t2:.2f}")
 
 
+    # # Run short strangle strategy
+    # if (cur_HHMM > short_strangle_time & short_strangle_flag == False):
+    #     short_strangle_flag = True
+    #     print("In Short Strangle condition.")
+
+    previous_min = cur_min
 
     cur_HHMM = int(datetime.datetime.now().strftime("%H%M"))
+ 
 
     time.sleep(10)   # reduce to accomodate the processing delay, if any
 
 
-print("====== Done ======", datetime.datetime.now())
+print("====== Done ======", datetime.datetime.now(),flush=True)
 
+exit_algo()
