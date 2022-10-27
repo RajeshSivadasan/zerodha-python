@@ -24,6 +24,11 @@
 # Short Bias : When Nifty/Call opens below  Pivot. 
 
 
+RsI over 90 Sell at next pivot levels
+Book at Target or 10 pts less than the pivot levels
+
+
+
 # Strategy 0:
 # Instead of Pivot point levels, use (open -  close) to see the % rise or fall and decide bias and 20/30/40/50 pts entry targets
 # So no need for getting historic data and all. 
@@ -43,8 +48,6 @@
 
 # Exit Criteria    : Book 75% of Qty at 1% of Margin used (Rs 1200 per lot) or 75% at first support if profit is above
 
-from operator import truediv
-from traceback import print_tb
 import pyotp
 from kiteext import KiteExt
 import time
@@ -61,7 +64,7 @@ if not os.path.exists("./log"):
     os.makedirs("./log")
 # Initialise logging and set console and error target as log file
 LOG_FILE = r"./log/kite_options_sell_" + datetime.datetime.now().strftime("%Y%m%d") +".log"
-sys.stdout = sys.stderr = open(LOG_FILE, "a") # use flush=True parameter in print statement if values are not seen in log file
+# sys.stdout = sys.stderr = open(LOG_FILE, "a") # use flush=True parameter in print statement if values are not seen in log file
 print(f"Logging to file :{LOG_FILE}",flush=True)
 
 
@@ -77,40 +80,54 @@ user_id = cfg.get("tokens", "user_id")
 password = cfg.get("tokens", "password")
 totp_key = cfg.get("tokens", "totp_key")
 
-nifty_opt_ce_max_price_limit = int(cfg.get("info", "nifty_opt_ce_max_price_limit"))
-nifty_opt_pe_max_price_limit = int(cfg.get("info", "nifty_opt_pe_max_price_limit"))
-short_strangle_time = int(cfg.get("info", "short_strangle_time"))
+nifty_opt_ce_max_price_limit = int(cfg.get("info", "nifty_opt_ce_max_price_limit")) # 105
+nifty_opt_pe_max_price_limit = int(cfg.get("info", "nifty_opt_pe_max_price_limit")) # 105
+
+short_strangle_time = int(cfg.get("info", "short_strangle_time"))   # 925
 short_strangle_flag = False
-interval = int(cfg.get("info", "interval"))   #3min, 5min, 10min ...
-profit_target_perc = float(cfg.get("info", "profit_target_perc"))  # profit target percentage of the utilised margin
-loss_limit_perc = float(cfg.get("info", "loss_limit_perc"))
+
+# Time interval e.g 2min, 3min, 5min, 10min ...
+interval = int(cfg.get("info", "interval"))   # 2
+
+# profit target percentage of the utilised margin
+profit_target_perc = float(cfg.get("info", "profit_target_perc"))  # 0.1 
+
+loss_limit_perc = float(cfg.get("info", "loss_limit_perc")) # 40
 
 print(f"profit_target_perc={profit_target_perc}, loss_limit_perc={loss_limit_perc}")
 
-
-
-
 #List of thursdays when its NSE holiday
-weekly_expiry_holiday_dates = cfg.get("info", "weekly_expiry_holiday_dates").split(",")
+weekly_expiry_holiday_dates = cfg.get("info", "weekly_expiry_holiday_dates").split(",") # 2023-01-26,2023-03-30,2024-08-15
+
+# List of days in number for which next week expiry needs to be selected, else use current week expiry
+next_week_expiry_days = list(map(int,cfg.get("info", "next_week_expiry_days").split(",")))
+
+# Get base lot and qty 
+nifty_opt_base_lot = int(cfg.get("info", "nifty_opt_base_lot"))         # 1
+nifty_opt_per_lot_qty = int(cfg.get("info", "nifty_opt_per_lot_qty"))   # 50
+
 
 # Get NIfty and BankNifty instrument data
 instruments = ["NSE:NIFTY 50","NSE:NIFTY BANK"] 
 
+
+
 # Login and get kite object
 # -------------------------
 # Get the latest TOTP
-toptp = pyotp.TOTP(totp_key).now()
+totp = pyotp.TOTP(totp_key).now()
+twoFA = f"{int(totp):06d}" if len(totp) <=5 else totp   # Suffix zeros if length of the totp is less than 5 digits
 
 # Authenticate using kite bypass and get Kite object
-kite = KiteExt(user_id=user_id, password=password, twofa=toptp)
-print(f"toptp={toptp}")
+kite = KiteExt(user_id=user_id, password=password, twofa=twoFA)
+print(f"totp={twoFA}")
 
 
 
 # Get current/next week expiry 
 # ----------------------------
 # if today is tue or wed then use next expiry else use current expiry. .isoweekday() 1 = Monday, 2 = Tuesday
-if datetime.date.today().isoweekday()  in (2,3,4):
+if datetime.date.today().isoweekday()  in (next_week_expiry_days):  # next_week_expiry_days = 2,3,4 
     expiry_date = datetime.date.today() + datetime.timedelta( ((3-datetime.date.today().weekday()) % 7)+7 )
 else:
     expiry_date = datetime.date.today() + datetime.timedelta( ((3-datetime.date.today().weekday()) % 7))
@@ -144,12 +161,12 @@ instrument_nifty_opt_pe = ""
 #        Declare Functions
 ########################################################
 
-def getOption():
+def get_options():
     '''
-    Gets the option instruments(instrument_nifty_opt_ce,instrument_nifty_opt_pe) 
+    Gets the call and put option instruments(instrument_nifty_opt_ce,instrument_nifty_opt_pe) 
     for the required strike as per the parameters and and calculates pivot points for entry and exit
     '''
-    print("In getOption():")
+    print("In get_options():")
     global instrument_nifty_opt_ce, instrument_nifty_opt_pe
 
     # Get Nifty ATM
@@ -217,12 +234,32 @@ def getOption():
 
     print(f"Pivot Points for {instrument_nifty_opt_ce.symbol[-1]}:")
     print(nifty_opt_ce_pp,nifty_opt_ce_r1,nifty_opt_ce_r2,nifty_opt_ce_r3,nifty_opt_ce_r4)
+    
+    # Add pivot points to the instrument df
+    instrument_nifty_opt_ce[['PP','R1','R2','R3','R4']] = pd.DataFrame([[nifty_opt_ce_pp, nifty_opt_ce_r1, nifty_opt_ce_r2, nifty_opt_ce_r3, nifty_opt_ce_r4]], index=instrument_nifty_opt_ce.index)
+
+
+    # Add ohlc data and last_price to the instrument df
+    dict_tmp =  kite.ohlc(instrument_token_ce).get(str(instrument_token_ce))
+    instrument_nifty_opt_ce = instrument_nifty_opt_ce.join(pd.DataFrame(dict_tmp['ohlc'], index=instrument_nifty_opt_ce.index))
+    instrument_nifty_opt_ce.last_price[-1]= dict_tmp['last_price']
+
+    print("instrument_nifty_opt_ce:",instrument_nifty_opt_ce)
+
+
+def place_call_orders():
+    '''
+    Place call orders and targets based on pivots/levels '''
+    if instrument_nifty_opt_ce.R1>instrument_nifty_opt_ce.limit_price:
+        qty = nifty_opt_base_lot * nifty_opt_per_lot_qty
+        place_order(instrument_nifty_opt_ce.symbol,  )
+
 
 def runShortStrangle():
     '''Runs short strangle at a given price range'''
     # Have to rethink about this strategy
 
-def place_order(symbol,qty,transaction_type=kite.TRANSACTION_TYPE_SELL,order_type=kite.ORDER_TYPE_LIMIT,limit_price=None,tag=None):
+def place_order(symbol,qty,transaction_type=kite.TRANSACTION_TYPE_SELL,order_type=kite.ORDER_TYPE_LIMIT,limit_price=None,tag="Algo"):
     try:
         order_id = kite.place_order(variety=kite.VARIETY_REGULAR,
                             exchange=kite.EXCHANGE_NFO,
@@ -237,10 +274,12 @@ def place_order(symbol,qty,transaction_type=kite.TRANSACTION_TYPE_SELL,order_typ
                             )
 
         print(f"Order Placed. order_id={order_id}")
+        return order_id
     except Exception as e:
         print(f"place_order(): Error placing order. {e}")
 
-def process_orders():
+
+def process_orders(place_call_orders=False):
     '''Check the status of orders/squareoff/add positions'''
     # kite.order_history()
     # kite.order_margins()
@@ -253,6 +292,13 @@ def process_orders():
     # print("df_pos=",df_pos)
     if df_pos.empty:
         print("No Positions found.")
+        if place_call_orders:
+            # Refresh call and put 
+            get_options()
+            place_call_orders()
+
+
+
     else:
 
         mtm , pos = df_pos   # Get MTM and Net Positon
@@ -287,7 +333,7 @@ def get_positions():
     '''Returns dataframe columns (m2m,quantity) with net values'''
     print("In get_positions():")
 
-    # Calculae mtm manually
+    # Calculae mtm manually as the m2m is 2-3 mins delayed as per public
     # pd.DataFrame(kite.positions().get('net'))[['tradingsymbol','sell_price']]
 
     try:
@@ -319,7 +365,8 @@ def exit_algo():
 # print(f"Order Placed. order_id={order_id}")
 
 # Get current tradable Option details. Can be used during anytime of the day   
-getOption()
+get_options()
+
 
 ######## Strategy 1: Sell both CE and PE
 # Keep 0.4 (40%) of the ltp as the SL for both
@@ -331,10 +378,12 @@ previous_min = 0
 print(f"cur_HHMM={cur_HHMM}")
 
 
-exit_algo()
+sys.exit(0)
+
+# exit_algo()
 
 # Process as per start and end of market timing
-while cur_HHMM > 914 and cur_HHMM < 1832:
+while cur_HHMM > 914 and cur_HHMM < 1532:
 # while True:
 
     
