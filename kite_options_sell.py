@@ -24,11 +24,6 @@
 # Short Bias : When Nifty/Call opens below  Pivot. 
 
 
-RsI over 90 Sell at next pivot levels
-Book at Target or 10 pts less than the pivot levels
-
-
-
 # Strategy 0:
 # Instead of Pivot point levels, use (open -  close) to see the % rise or fall and decide bias and 20/30/40/50 pts entry targets
 # So no need for getting historic data and all. 
@@ -194,6 +189,8 @@ def get_options():
     instrument_nifty_opt_ce = df_nifty_opt[(df_nifty_opt.type=='CE') & (df_nifty_opt.last_price==df_nifty_opt[(df_nifty_opt.type=='CE') & (df_nifty_opt.last_price<=nifty_opt_ce_max_price_limit)].last_price.max())]
     instrument_nifty_opt_pe = df_nifty_opt[(df_nifty_opt.type=='PE') & (df_nifty_opt.last_price==df_nifty_opt[(df_nifty_opt.type=='PE') & (df_nifty_opt.last_price<=nifty_opt_pe_max_price_limit)].last_price.max())]
 
+    print("type(instrument_nifty_opt_ce)=",type(instrument_nifty_opt_ce))
+
     print("Call selected is:",instrument_nifty_opt_ce)
     print("Put  selected is :",instrument_nifty_opt_pe)
 
@@ -236,16 +233,19 @@ def get_options():
     print(nifty_opt_ce_pp,nifty_opt_ce_r1,nifty_opt_ce_r2,nifty_opt_ce_r3,nifty_opt_ce_r4)
     
     # Add pivot points to the instrument df
-    instrument_nifty_opt_ce[['PP','R1','R2','R3','R4']] = pd.DataFrame([[nifty_opt_ce_pp, nifty_opt_ce_r1, nifty_opt_ce_r2, nifty_opt_ce_r3, nifty_opt_ce_r4]], index=instrument_nifty_opt_ce.index)
+    # instrument_nifty_opt_ce[['PP','R1','R2','R3','R4']] = pd.DataFrame([[nifty_opt_ce_pp, nifty_opt_ce_r1, nifty_opt_ce_r2, nifty_opt_ce_r3, nifty_opt_ce_r4]], index=instrument_nifty_opt_ce.index)
+
+    instrument_nifty_opt_ce.loc[instrument_nifty_opt_ce.index[-1],['PP','R1','R2','R3','R4']]=nifty_opt_ce_pp, nifty_opt_ce_r1, nifty_opt_ce_r2, nifty_opt_ce_r3, nifty_opt_ce_r4
 
 
     # Add ohlc data and last_price to the instrument df
     dict_tmp =  kite.ohlc(instrument_token_ce).get(str(instrument_token_ce))
     instrument_nifty_opt_ce = instrument_nifty_opt_ce.join(pd.DataFrame(dict_tmp['ohlc'], index=instrument_nifty_opt_ce.index))
-    instrument_nifty_opt_ce.last_price[-1]= dict_tmp['last_price']
+    instrument_nifty_opt_ce.last_price[-1] = dict_tmp['last_price']
+    # instrument_nifty_opt_ce.loc[instrument_nifty_opt_ce.index[-1],'last_price'] = dict_tmp['last_price']
 
-    print("instrument_nifty_opt_ce:",instrument_nifty_opt_ce)
-
+    print("instrument_nifty_opt_ce:=")
+    print(instrument_nifty_opt_ce)
 
 def place_call_orders():
     '''
