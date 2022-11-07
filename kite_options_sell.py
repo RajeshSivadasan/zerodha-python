@@ -43,6 +43,10 @@
 
 # Exit Criteria    : Book 75% of Qty at 1% of Margin used (Rs 1200 per lot) or 75% at first support if profit is above
 
+# TO DO
+# net_margin_utilised =  (abs(pos)/50) * 100000   # lot size to be parameterised for nifty/bank
+
+
 import pyotp
 from kiteext import KiteExt
 import time
@@ -155,7 +159,6 @@ instrument_nifty_opt_pe = ""
 ########################################################
 #        Declare Functions
 ########################################################
-
 def get_options():
     '''
     Gets the call and put option instruments(instrument_nifty_opt_ce,instrument_nifty_opt_pe) 
@@ -174,7 +177,7 @@ def get_options():
 
     # Get list of +- 300 stikes to filter the required price range strike
     # Get list of CE/PE rounded strikes 300 pts on either side of the option chain
-    lst_nifty_opt = df[(df.name=='NIFTY') & ((df.strike>=nifty_atm-300) & (df.strike<=nifty_atm+300)) & (df.strike%100==0) ].tradingsymbol.apply(lambda x:'NFO:'+x).tolist()
+    lst_nifty_opt = df[(df.name=='NIFTY') & ((df.strike>=nifty_atm-500) & (df.strike<=nifty_atm+500)) & (df.strike%100==0) ].tradingsymbol.apply(lambda x:'NFO:'+x).tolist()
 
     # Get ltp for the list of filtered CE/PE strikes 
     dict_nifty_opt_ltp = kite.ltp(lst_nifty_opt)
@@ -186,20 +189,19 @@ def get_options():
     df_nifty_opt['symbol'] = df_nifty_opt.index         # Create symbol column
 
     # Get the CE/PE instrument data(instrument_token,last_price,type,symbol) where last_price is maximum but less than equal to option max price limit (e.g <=200)
-    instrument_nifty_opt_ce = df_nifty_opt[(df_nifty_opt.type=='CE') & (df_nifty_opt.last_price==df_nifty_opt[(df_nifty_opt.type=='CE') & (df_nifty_opt.last_price<=nifty_opt_ce_max_price_limit)].last_price.max())]
-    instrument_nifty_opt_pe = df_nifty_opt[(df_nifty_opt.type=='PE') & (df_nifty_opt.last_price==df_nifty_opt[(df_nifty_opt.type=='PE') & (df_nifty_opt.last_price<=nifty_opt_pe_max_price_limit)].last_price.max())]
-
-    print("type(instrument_nifty_opt_ce)=",type(instrument_nifty_opt_ce))
-
-    print("Call selected is:",instrument_nifty_opt_ce)
-    print("Put  selected is :",instrument_nifty_opt_pe)
+    df_instrument_nifty_opt_ce = df_nifty_opt[(df_nifty_opt.type=='CE') & (df_nifty_opt.last_price==df_nifty_opt[(df_nifty_opt.type=='CE') & (df_nifty_opt.last_price<=nifty_opt_ce_max_price_limit)].last_price.max())]
+    df_instrument_nifty_opt_pe = df_nifty_opt[(df_nifty_opt.type=='PE') & (df_nifty_opt.last_price==df_nifty_opt[(df_nifty_opt.type=='PE') & (df_nifty_opt.last_price<=nifty_opt_pe_max_price_limit)].last_price.max())]
 
 
-    # Get CE instrument token (instrument_token)
-    instrument_token_ce = instrument_nifty_opt_ce.instrument_token[-1]
+    print("Call selected is:",df_instrument_nifty_opt_ce)
+    print("Put  selected is :",df_instrument_nifty_opt_pe)
+
 
     # Get CE instrument token (instrument_token)
-    instrument_token_pe = instrument_nifty_opt_pe.instrument_token[-1]
+    instrument_token_ce = df_instrument_nifty_opt_ce.instrument_token[-1]
+
+    # Get CE instrument token (instrument_token)
+    instrument_token_pe = df_instrument_nifty_opt_pe.instrument_token[-1]
 
     # Get previous day data for CE and PE
     # We will get last five days of data and take the latest one so that even if previous day is a holiday we will get next trading day data
@@ -207,7 +209,7 @@ def get_options():
     to_date = datetime.date.today()-datetime.timedelta(days=1)
     df_hist_ce = pd.DataFrame(kite.historical_data(instrument_token_ce,from_date,to_date,'day'))
 
-    print(f"Previous day OHLC for {instrument_nifty_opt_ce.symbol[-1]}:")
+    print(f"Previous day OHLC for {df_instrument_nifty_opt_ce.symbol[-1]}:")
     print(df_hist_ce.iloc[-1])  #Previous days ohlc data
 
 
@@ -229,23 +231,34 @@ def get_options():
     # nifty_opt_ce_open = kite.ohlc(instrument_token_ce)[str(instrument_token_ce)]['ohlc']['open']
     # nifty_opt_ce_gap_updown = nifty_opt_ce_open - nifty_opt_ce_last_close
 
-    print(f"Pivot Points for {instrument_nifty_opt_ce.symbol[-1]}:")
+    print(f"Pivot Points for {df_instrument_nifty_opt_ce.symbol[-1]}:")
     print(nifty_opt_ce_pp,nifty_opt_ce_r1,nifty_opt_ce_r2,nifty_opt_ce_r3,nifty_opt_ce_r4)
     
     # Add pivot points to the instrument df
     # instrument_nifty_opt_ce[['PP','R1','R2','R3','R4']] = pd.DataFrame([[nifty_opt_ce_pp, nifty_opt_ce_r1, nifty_opt_ce_r2, nifty_opt_ce_r3, nifty_opt_ce_r4]], index=instrument_nifty_opt_ce.index)
 
-    instrument_nifty_opt_ce.loc[instrument_nifty_opt_ce.index[-1],['PP','R1','R2','R3','R4']]=nifty_opt_ce_pp, nifty_opt_ce_r1, nifty_opt_ce_r2, nifty_opt_ce_r3, nifty_opt_ce_r4
+    df_instrument_nifty_opt_ce.loc[df_instrument_nifty_opt_ce.index[-1],['PP','R1','R2','R3','R4']] = nifty_opt_ce_pp, nifty_opt_ce_r1, nifty_opt_ce_r2, nifty_opt_ce_r3, nifty_opt_ce_r4
 
 
     # Add ohlc data and last_price to the instrument df
     dict_tmp =  kite.ohlc(instrument_token_ce).get(str(instrument_token_ce))
-    instrument_nifty_opt_ce = instrument_nifty_opt_ce.join(pd.DataFrame(dict_tmp['ohlc'], index=instrument_nifty_opt_ce.index))
-    instrument_nifty_opt_ce.last_price[-1] = dict_tmp['last_price']
-    # instrument_nifty_opt_ce.loc[instrument_nifty_opt_ce.index[-1],'last_price'] = dict_tmp['last_price']
+    df_instrument_nifty_opt_ce = df_instrument_nifty_opt_ce.join(pd.DataFrame(dict_tmp['ohlc'], index=df_instrument_nifty_opt_ce.index))
 
-    print("instrument_nifty_opt_ce:=")
-    print(instrument_nifty_opt_ce)
+    print("df_instrument_nifty_opt_ce:")
+    print(df_instrument_nifty_opt_ce)
+
+    # df_instrument_nifty_opt_ce = df_instrument_nifty_opt_ce.copy(deep=False)
+
+    # tmp = float(dict_tmp['last_price'])
+    # print(f"tmp={tmp}")
+    # df_instrument_nifty_opt_ce.last_price[-1] = tmp
+    # df_instrument_nifty_opt_ce['last_price'].iloc[-1] = float(dict_tmp['last_price'])
+    # df_instrument_nifty_opt_ce.last_price[-1] = float(dict_tmp['last_price'])
+    df_instrument_nifty_opt_ce.loc[df_instrument_nifty_opt_ce.index[-1],'last_price'] = float(dict_tmp['last_price'])
+
+    print("df_instrument_nifty_opt_ce:=")
+    print(df_instrument_nifty_opt_ce)
+
 
 def place_call_orders():
     '''
@@ -281,15 +294,16 @@ def place_order(symbol,qty,transaction_type=kite.TRANSACTION_TYPE_SELL,order_typ
 
 def process_orders(place_call_orders=False):
     '''Check the status of orders/squareoff/add positions'''
-    # kite.order_history()
-    # kite.order_margins()
-    # kite.order_trades()
-    # kite.orders()
+
     print("In process_orders():")
+
     mtm = 0
     pos = 0
-    df_pos = get_positions()
-    # print("df_pos=",df_pos)
+
+    # Check MTM price with the actual on portal
+    df_pos = get_positions() 
+    print(f"df_pos={df_pos}")
+    
     if df_pos.empty:
         print("No Positions found.")
         if place_call_orders:
@@ -297,20 +311,25 @@ def process_orders(place_call_orders=False):
             get_options()
             place_call_orders()
 
-
-
     else:
 
-        mtm , pos = df_pos   # Get MTM and Net Positon
+        mtm , pos = df_pos.loc[0,['m2m','quantity']]   # Get MTM and Net Positon
         
+        print(f"pos={pos}")
+
+
         if abs(pos)>0:
-            net_margin_utilised = round(pd.DataFrame(kite.margins()).equity.utilised.get('debits')) 
+
+            # net_margin_utilised = round(pd.DataFrame(kite.margins()).equity.utilised.get('debits')) 
+            # Using the below as kite considers the margins blocked for open orders as well
+            net_margin_utilised =  (abs(pos)/50) * 100000   # lot size to be parameterised for nifty/bank
+            
             profit_target = round(net_margin_utilised * (profit_target_perc/100))
-            print(f"mtm={mtm}, pos={pos}, profit_target={profit_target}")
+            print(f"mtm={mtm}, pos={pos}, net_margin_utilised={net_margin_utilised}, profit_target={profit_target}")
             
             if mtm > profit_target:
                 # Squareoff 80% (In Case of Large Qtys) of the positions 
-                print("Squareoff")
+                print("mtm > profit_target; Squareoff")
                 df_SqOff = pd.DataFrame(kite.positions().get('net'))[['tradingsymbol','m2m','quantity']]
                 for indx in df_SqOff.index:
                     symbol = df_SqOff['tradingsymbol'][indx]
@@ -321,9 +340,13 @@ def process_orders(place_call_orders=False):
                 print("All Positions Squared Off. Exiting Algo...")
                 exit_algo()
             else:
-                # Check if loss needs to be booked
-                if abs(round((mtm / net_margin_utilised)*100,1)) > loss_limit_perc:
-                    print("Book Loss")
+                    # Check if loss needs to be booked
+                    current_mtm_perc = round((mtm / net_margin_utilised)*100,1)
+                    print(f"current_mtm_perc={current_mtm_perc}, loss_limit_perc={loss_limit_perc}")
+                    
+                    if current_mtm_perc < 0:
+                        if abs(current_mtm_perc) > loss_limit_perc:
+                            print(f"Book Loss.(Placeholder Only)")
         
         else:
             print("No Active Positions Found")
@@ -334,10 +357,20 @@ def get_positions():
     print("In get_positions():")
 
     # Calculae mtm manually as the m2m is 2-3 mins delayed as per public
-    # pd.DataFrame(kite.positions().get('net'))[['tradingsymbol','sell_price']]
 
+    mtm = 0.0
+    qty = 0
     try:
-        return pd.DataFrame(kite.positions().get('net'))[['m2m','quantity']].sum()
+        # return pd.DataFrame(kite.positions().get('net'))[['m2m','quantity']].sum()
+        dict_positions = kite.positions()["net"]
+
+        for pos in dict_positions:
+            mtm = mtm + ( float(pos["sell_value"]) - float(pos["buy_value"]) ) + ( float(pos["quantity"]) * float(pos["last_price"]) * float(pos["multiplier"]))
+            qty = qty + int(pos["quantity"])
+            print(pos["tradingsymbol"],mtm,qty)
+
+        return pd.DataFrame([[mtm,qty]],columns = ['m2m', 'quantity'])
+
     except Exception as ex:
         print(f"Unable to fetch positions(m2m and qty) dataframe. Error : {ex}")
         return pd.DataFrame()
@@ -365,7 +398,7 @@ def exit_algo():
 # print(f"Order Placed. order_id={order_id}")
 
 # Get current tradable Option details. Can be used during anytime of the day   
-get_options()
+# get_options()
 
 
 ######## Strategy 1: Sell both CE and PE
@@ -377,6 +410,9 @@ cur_HHMM = int(datetime.datetime.now().strftime("%H%M"))
 previous_min = 0
 print(f"cur_HHMM={cur_HHMM}")
 
+get_options()
+
+process_orders()
 
 sys.exit(0)
 
