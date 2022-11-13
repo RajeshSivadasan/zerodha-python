@@ -58,13 +58,22 @@ import pandas as pd
 # from kiteconnect import KiteTicker    # Used for websocket only
 
 
-# Enable logging to file; if log folder is not present create it
+def print_log(*args):
+    strMsg = ""
+    for arg in args:
+        strMsg = strMsg + str(arg)
+    print(f"{datetime.datetime.now()}|{strMsg}",flush=True)
+
+# If log folder is not present create it
 if not os.path.exists("./log"):
     os.makedirs("./log")
+
 # Initialise logging and set console and error target as log file
 LOG_FILE = r"./log/kite_options_sell_" + datetime.datetime.now().strftime("%Y%m%d") +".log"
+print_log(f"Logging to file :{LOG_FILE}")
+# Uncomment below code to get the logs into the logfile 
 # sys.stdout = sys.stderr = open(LOG_FILE, "a") # use flush=True parameter in print statement if values are not seen in log file
-print(f"Logging to file :{LOG_FILE}",flush=True)
+
 
 
 ########################################################
@@ -79,8 +88,8 @@ user_id = cfg.get("tokens", "user_id")
 password = cfg.get("tokens", "password")
 totp_key = cfg.get("tokens", "totp_key")
 
-nifty_opt_ce_max_price_limit = int(cfg.get("info", "nifty_opt_ce_max_price_limit")) # 105
-nifty_opt_pe_max_price_limit = int(cfg.get("info", "nifty_opt_pe_max_price_limit")) # 105
+nifty_ce_max_price_limit = int(cfg.get("info", "nifty_ce_max_price_limit")) # 105
+nifty_pe_max_price_limit = int(cfg.get("info", "nifty_pe_max_price_limit")) # 105
 
 short_strangle_time = int(cfg.get("info", "short_strangle_time"))   # 925
 short_strangle_flag = False
@@ -90,10 +99,9 @@ interval = int(cfg.get("info", "interval"))   # 2
 
 # profit target percentage of the utilised margin
 profit_target_perc = float(cfg.get("info", "profit_target_perc"))  # 0.1 
-
 loss_limit_perc = float(cfg.get("info", "loss_limit_perc")) # 40
+stratgy1_entry_time = int(cfg.get("info", "stratgy1_entry_time"))
 
-print(f"profit_target_perc={profit_target_perc}, loss_limit_perc={loss_limit_perc}")
 
 #List of thursdays when its NSE holiday
 weekly_expiry_holiday_dates = cfg.get("info", "weekly_expiry_holiday_dates").split(",") # 2023-01-26,2023-03-30,2024-08-15
@@ -105,6 +113,15 @@ next_week_expiry_days = list(map(int,cfg.get("info", "next_week_expiry_days").sp
 nifty_opt_base_lot = int(cfg.get("info", "nifty_opt_base_lot"))         # 1
 nifty_opt_per_lot_qty = int(cfg.get("info", "nifty_opt_per_lot_qty"))   # 50
 
+nifty_avg_margin_req_per_lot = int(cfg.get("info", "nifty_avg_margin_req_per_lot"))
+
+virtual_trade = int(cfg.get("info", "virtual_trade"))   # 0 = Disabled - Trades will be executed in real; 1 = Enabled - No trades will be executed on exchange
+
+all_variables = f"user_id={user_id} interval={interval} profit_target_perc={profit_target_perc} loss_limit_perc={loss_limit_perc}"\
+    f"stratgy1_entry_time={stratgy1_entry_time} nifty_opt_base_lot={nifty_opt_base_lot}"\
+    f"nifty_ce_max_price_limit={nifty_ce_max_price_limit} nifty_pe_max_price_limit={nifty_pe_max_price_limit} \n***virtual_trade={virtual_trade}"
+
+print_log("Settings used : " + all_variables)
 
 # Get NIfty and BankNifty instrument data
 instruments = ["NSE:NIFTY 50","NSE:NIFTY BANK"] 
@@ -119,7 +136,7 @@ twoFA = f"{int(totp):06d}" if len(totp) <=5 else totp   # Suffix zeros if length
 
 # Authenticate using kite bypass and get Kite object
 kite = KiteExt(user_id=user_id, password=password, twofa=twoFA)
-print(f"totp={twoFA}")
+# print_log(f"totp={twoFA}")
 
 
 
@@ -134,38 +151,74 @@ else:
 if str(expiry_date) in weekly_expiry_holiday_dates :
     expiry_date = expiry_date - datetime.timedelta(days=1)
 
-print(f"expiry_date={expiry_date}")
+print_log(f"expiry_date = {expiry_date}")
+
 
 # Get option instruments for the expiry
 df = pd.DataFrame(kite.instruments("NFO"))
 df = df[(df.segment=='NFO-OPT') & (df.expiry==expiry_date)] 
 
 
-
 # To find nifty open range to decide market bias (Long,Short,Neutral)
 nifty_olhc = kite.ohlc(instruments[0])
+# WIP - Need to work on this
 
+# print_log(f"opt_instrument={opt_instrument}")
+# print_log(f"nifty_opt_ltp={nifty_opt_ltp}")
+# print_log(f"nifty_opt_ohlc={nifty_opt_ohlc}")
+# print_log(f"nifty_olhc={nifty_olhc}")
 
-# print(f"opt_instrument={opt_instrument}")
-# print(f"nifty_opt_ltp={nifty_opt_ltp}")
-# print(f"nifty_opt_ohlc={nifty_opt_ohlc}")
-# print(f"nifty_olhc={nifty_olhc}")
-
-
-instrument_nifty_opt_ce = ""
-instrument_nifty_opt_pe = ""
+# Dictionary to store single row of call /  put option details
+dict_nifty_ce = {}
+dict_nifty_pe = {}
 
 
 ########################################################
 #        Declare Functions
 ########################################################
+def get_pivot_points(instrument_token):
+    ''' Returns Pivot points dictionary for a given instrument token using previous day vaues
+    '''
+    from_date = datetime.date.today()-datetime.timedelta(days=5)
+    to_date = datetime.date.today()-datetime.timedelta(days=1)
+    try:
+        # Return last row of the dataframe as dictionary
+        dict_ohlc =  pd.DataFrame(kite.historical_data(instrument_token,from_date,to_date,'day')).iloc[-1].to_dict()
+
+        # Calculate Pivot Points and update the dictionary
+        last_high = dict_ohlc["high"]
+        last_low = dict_ohlc["low"]
+        last_close = dict_ohlc["close"]
+
+        range = last_high - last_low
+        dict_ohlc["pp"] = pp = round((last_high + last_low + last_close)/3)
+        dict_ohlc["r1"] = r1 = round((2 * pp) - last_low)
+        dict_ohlc["r2"] = r2 = round(pp + range)
+        dict_ohlc["r3"] = r3 = round(pp + 2 * range)
+        dict_ohlc["r4"] = r4 = r3 + (r3 - r2)   # ???? For r4 Check if we need to divide / 2 and then round
+        dict_ohlc["s1"] = s1 = round((2 * pp) - last_high)
+        dict_ohlc["s2"] = s2 = round(pp - (r1 - s1))
+        dict_ohlc["s3"] = s3 = round(pp - 2 * (last_high - last_low))
+
+        print_log(f"Pivot Points for {instrument_token} : {s1}(s1) {s2}(s2) {s3}(s3) {pp}(pp) {r1}(r1) {r2}(r2) {r3}(r3) {r4}(r4)")
+        
+        dict_ohlc["instrument_token"] = instrument_token
+
+        return dict_ohlc
+
+    except Exception as ex:
+        print_log(f"Unable to fetch pivor points for token {instrument_token}. Error : {ex}")
+        return {}
+
+
 def get_options():
     '''
-    Gets the call and put option instruments(instrument_nifty_opt_ce,instrument_nifty_opt_pe) 
+    Gets the call and put option in the global df objects (dict_nifty_ce, df_instrument_nifty_opt_pe) 
     for the required strike as per the parameters and and calculates pivot points for entry and exit
     '''
-    print("In get_options():")
-    global instrument_nifty_opt_ce, instrument_nifty_opt_pe
+    global dict_nifty_ce, dict_nifty_pe
+
+    print_log("In get_options():")
 
     # Get Nifty ATM
     inst_ltp = kite.ltp(instruments)
@@ -175,8 +228,8 @@ def get_options():
     # Find option stike for entry 
     #----------------------------
 
-    # Get list of +- 300 stikes to filter the required price range strike
-    # Get list of CE/PE rounded strikes 300 pts on either side of the option chain
+    # Get list of +- 500 stikes to filter the required price range strike
+    # Get list of CE/PE rounded strikes 500 pts on either side of the ATM from option chain
     lst_nifty_opt = df[(df.name=='NIFTY') & ((df.strike>=nifty_atm-500) & (df.strike<=nifty_atm+500)) & (df.strike%100==0) ].tradingsymbol.apply(lambda x:'NFO:'+x).tolist()
 
     # Get ltp for the list of filtered CE/PE strikes 
@@ -185,98 +238,112 @@ def get_options():
     # Convert the option ltp dict to dataframe for filtering option
     df_nifty_opt = pd.DataFrame.from_dict(dict_nifty_opt_ltp,orient='index')
 
-    df_nifty_opt['type']= df_nifty_opt.index.str[-2:]   # Create type column
-    df_nifty_opt['symbol'] = df_nifty_opt.index         # Create symbol column
+    df_nifty_opt['type']= df_nifty_opt.index.str[-2:]               # Create type column
+    df_nifty_opt['tradingsymbol'] = df_nifty_opt.index.str[4:]      # Create tradingsymbol column
 
     # Get the CE/PE instrument data(instrument_token,last_price,type,symbol) where last_price is maximum but less than equal to option max price limit (e.g <=200)
-    df_instrument_nifty_opt_ce = df_nifty_opt[(df_nifty_opt.type=='CE') & (df_nifty_opt.last_price==df_nifty_opt[(df_nifty_opt.type=='CE') & (df_nifty_opt.last_price<=nifty_opt_ce_max_price_limit)].last_price.max())]
-    df_instrument_nifty_opt_pe = df_nifty_opt[(df_nifty_opt.type=='PE') & (df_nifty_opt.last_price==df_nifty_opt[(df_nifty_opt.type=='PE') & (df_nifty_opt.last_price<=nifty_opt_pe_max_price_limit)].last_price.max())]
+    df_nifty_opt_ce = df_nifty_opt[(df_nifty_opt.type=='CE') & (df_nifty_opt.last_price==df_nifty_opt[(df_nifty_opt.type=='CE') & (df_nifty_opt.last_price<=nifty_ce_max_price_limit)].last_price.max())]
+    df_nifty_opt_pe = df_nifty_opt[(df_nifty_opt.type=='PE') & (df_nifty_opt.last_price==df_nifty_opt[(df_nifty_opt.type=='PE') & (df_nifty_opt.last_price<=nifty_pe_max_price_limit)].last_price.max())]
 
 
-    print("Call selected is:",df_instrument_nifty_opt_ce)
-    print("Put  selected is :",df_instrument_nifty_opt_pe)
+    print_log(f"Call selected is : {df_nifty_opt_ce.tradingsymbol[-1]}({df_nifty_opt_ce.instrument_token[-1]}) last_price = {df_nifty_opt_ce.last_price[-1]}")
+    print_log(f"Put  selected is : {df_nifty_opt_pe.tradingsymbol[-1]}({df_nifty_opt_pe.instrument_token[-1]}) last_price = {df_nifty_opt_pe.last_price[-1]}")
 
 
     # Get CE instrument token (instrument_token)
-    instrument_token_ce = df_instrument_nifty_opt_ce.instrument_token[-1]
+    instrument_token_ce = str(df_nifty_opt_ce.instrument_token[-1])
 
-    # Get CE instrument token (instrument_token)
-    instrument_token_pe = df_instrument_nifty_opt_pe.instrument_token[-1]
+    # Get PE instrument token (instrument_token)
+    instrument_token_pe = str(df_nifty_opt_pe.instrument_token[-1])
 
-    # Get previous day data for CE and PE
-    # We will get last five days of data and take the latest one so that even if previous day is a holiday we will get next trading day data
-    from_date = datetime.date.today()-datetime.timedelta(days=5)
-    to_date = datetime.date.today()-datetime.timedelta(days=1)
-    df_hist_ce = pd.DataFrame(kite.historical_data(instrument_token_ce,from_date,to_date,'day'))
+    # Check if we can use Dask to parallelise the operations
+    # Get pivot points for the selected instrument
+    dict_pivot = get_pivot_points(instrument_token_ce)
 
-    print(f"Previous day OHLC for {df_instrument_nifty_opt_ce.symbol[-1]}:")
-    print(df_hist_ce.iloc[-1])  #Previous days ohlc data
+    # print_log("dict_pivot=",dict_pivot)
 
-
-    # Calculate Pivot Points for CE
-    # nifty_opt_ce_last_open = df_hist_ce.iloc[-1].open
-    nifty_opt_ce_last_high = df_hist_ce.iloc[-1].high
-    nifty_opt_ce_last_low = df_hist_ce.iloc[-1].low
-    nifty_opt_ce_last_close = df_hist_ce.iloc[-1].close
-
-    nifty_opt_ce_range = nifty_opt_ce_last_high - nifty_opt_ce_last_low
-    nifty_opt_ce_pp = round((nifty_opt_ce_last_high + nifty_opt_ce_last_low + nifty_opt_ce_last_close)/3)
-    nifty_opt_ce_r1 = round((2 * nifty_opt_ce_pp) - nifty_opt_ce_last_low)
-    nifty_opt_ce_r2 = round(nifty_opt_ce_pp + nifty_opt_ce_range)
-    nifty_opt_ce_r3 = round(nifty_opt_ce_pp + 2 * nifty_opt_ce_range)
-    # ???? Check if we need to divide / 2 and then round
-    nifty_opt_ce_r4 = nifty_opt_ce_r3 + round((nifty_opt_ce_r3 - nifty_opt_ce_r2))  
-
-
-    # nifty_opt_ce_open = kite.ohlc(instrument_token_ce)[str(instrument_token_ce)]['ohlc']['open']
-    # nifty_opt_ce_gap_updown = nifty_opt_ce_open - nifty_opt_ce_last_close
-
-    print(f"Pivot Points for {df_instrument_nifty_opt_ce.symbol[-1]}:")
-    print(nifty_opt_ce_pp,nifty_opt_ce_r1,nifty_opt_ce_r2,nifty_opt_ce_r3,nifty_opt_ce_r4)
+    if dict_pivot:
+        dict_nifty_ce = dict_pivot
+        # update the ltp and tradingsymbol
+        dict_nifty_ce["last_price"] = kite.ltp(instrument_token_ce)[instrument_token_ce]['last_price']
+        dict_nifty_ce["tradingsymbol"] = df_nifty_opt_ce.tradingsymbol[-1]
+        # print_log("dict_nifty_ce:=",dict_nifty_ce)
     
-    # Add pivot points to the instrument df
-    # instrument_nifty_opt_ce[['PP','R1','R2','R3','R4']] = pd.DataFrame([[nifty_opt_ce_pp, nifty_opt_ce_r1, nifty_opt_ce_r2, nifty_opt_ce_r3, nifty_opt_ce_r4]], index=instrument_nifty_opt_ce.index)
-
-    df_instrument_nifty_opt_ce.loc[df_instrument_nifty_opt_ce.index[-1],['PP','R1','R2','R3','R4']] = nifty_opt_ce_pp, nifty_opt_ce_r1, nifty_opt_ce_r2, nifty_opt_ce_r3, nifty_opt_ce_r4
-
-
-    # Add ohlc data and last_price to the instrument df
-    dict_tmp =  kite.ohlc(instrument_token_ce).get(str(instrument_token_ce))
-    df_instrument_nifty_opt_ce = df_instrument_nifty_opt_ce.join(pd.DataFrame(dict_tmp['ohlc'], index=df_instrument_nifty_opt_ce.index))
-
-    print("df_instrument_nifty_opt_ce:")
-    print(df_instrument_nifty_opt_ce)
-
-    # df_instrument_nifty_opt_ce = df_instrument_nifty_opt_ce.copy(deep=False)
-
-    # tmp = float(dict_tmp['last_price'])
-    # print(f"tmp={tmp}")
-    # df_instrument_nifty_opt_ce.last_price[-1] = tmp
-    # df_instrument_nifty_opt_ce['last_price'].iloc[-1] = float(dict_tmp['last_price'])
-    # df_instrument_nifty_opt_ce.last_price[-1] = float(dict_tmp['last_price'])
-    df_instrument_nifty_opt_ce.loc[df_instrument_nifty_opt_ce.index[-1],'last_price'] = float(dict_tmp['last_price'])
-
-    print("df_instrument_nifty_opt_ce:=")
-    print(df_instrument_nifty_opt_ce)
-
+    else:
+        print_log(f"Unable to get Pivot points for {instrument_token_ce}")
+    
 
 def place_call_orders():
-    '''
-    Place call orders and targets based on pivots/levels '''
-    if instrument_nifty_opt_ce.R1>instrument_nifty_opt_ce.limit_price:
-        qty = nifty_opt_base_lot * nifty_opt_per_lot_qty
-        place_order(instrument_nifty_opt_ce.symbol,  )
+    ''' Place call orders and targets based on pivots/levels '''
+
+    print_log("In place_call_orders():")
+
+    # Get open orders
+    df_orders = pd.DataFrame(kite.orders())
+    
+    # Exit if there are already open orders 
+    if df_orders.empty:
+        pass
+    
+    else:
+        if sum(df_orders.status=='OPEN') > 0: 
+            print_log("Open Orders found. No orders will be placed.")
+            print_log(df_orders)
+            return
+
+    last_price = dict_nifty_ce["last_price"]
+    tradingsymbol = dict_nifty_ce["tradingsymbol"]
+    qty = nifty_opt_base_lot * nifty_opt_per_lot_qty
+
+    # rng = (dict_nifty_ce["r2"] - dict_nifty_ce["r1"])/2
+    if dict_nifty_ce["s2"] <= last_price < dict_nifty_ce["s1"] :
+        place_order(tradingsymbol,qty,float(dict_nifty_ce["s1"]))
+        place_order(tradingsymbol,qty,float(dict_nifty_ce["pp"]))
+        place_order(tradingsymbol,qty,float(dict_nifty_ce["r1"]))
+        place_order(tradingsymbol,qty,float(dict_nifty_ce["r2"]))
+        place_order(tradingsymbol,qty,float(dict_nifty_ce["r3"]))
+        place_order(tradingsymbol,qty,float(dict_nifty_ce["r4"]))
+
+    elif dict_nifty_ce["s1"] <= last_price < dict_nifty_ce["pp"] :
+        place_order(tradingsymbol,qty,float(dict_nifty_ce["pp"]))
+        place_order(tradingsymbol,qty,float(dict_nifty_ce["r1"]))
+        place_order(tradingsymbol,qty,float(dict_nifty_ce["r2"]))
+        place_order(tradingsymbol,qty,float(dict_nifty_ce["r3"]))
+        place_order(tradingsymbol,qty,float(dict_nifty_ce["r4"]))
+
+    elif dict_nifty_ce["pp"] <= last_price < dict_nifty_ce["r1"] :
+        place_order(tradingsymbol,qty,float(dict_nifty_ce["r1"]))
+        place_order(tradingsymbol,qty,float(dict_nifty_ce["r2"]))
+        place_order(tradingsymbol,qty,float(dict_nifty_ce["r3"]))
+        place_order(tradingsymbol,qty,float(dict_nifty_ce["r4"]))
+
+    elif dict_nifty_ce["r1"] <= last_price < dict_nifty_ce["r2"] :
+        place_order(tradingsymbol,qty,float(dict_nifty_ce["r2"]))
+        place_order(tradingsymbol,qty,float(dict_nifty_ce["r3"]))
+        place_order(tradingsymbol,qty,float(dict_nifty_ce["r4"]))
+
+    elif dict_nifty_ce["r2"] <= last_price < dict_nifty_ce["r3"] :
+        place_order(tradingsymbol,qty,float(dict_nifty_ce["r3"]))
+        place_order(tradingsymbol,qty,float(dict_nifty_ce["r4"]))
+
+    else:
+        print_log(f"Unable to find pivots and place order for {tradingsymbol}")
 
 
 def runShortStrangle():
     '''Runs short strangle at a given price range'''
     # Have to rethink about this strategy
 
-def place_order(symbol,qty,transaction_type=kite.TRANSACTION_TYPE_SELL,order_type=kite.ORDER_TYPE_LIMIT,limit_price=None,tag="Algo"):
+def place_order(tradingsymbol,qty,limit_price=None,transaction_type=kite.TRANSACTION_TYPE_SELL,order_type=kite.ORDER_TYPE_LIMIT,tag="Algo"):
+    if virtual_trade:
+        print_log(f"Virtual Order Placed : tradingsymbol={tradingsymbol}, qty={qty}, limit_price={limit_price}, transaction_type={transaction_type}")
+        return 
+
+    # If not virtual trade, execute order on exchange
     try:
         order_id = kite.place_order(variety=kite.VARIETY_REGULAR,
                             exchange=kite.EXCHANGE_NFO,
-                            tradingsymbol=symbol,
+                            tradingsymbol=tradingsymbol,
                             transaction_type=transaction_type,
                             quantity=qty,
                             product=kite.PRODUCT_NRML,
@@ -286,98 +353,115 @@ def place_order(symbol,qty,transaction_type=kite.TRANSACTION_TYPE_SELL,order_typ
                             tag=tag
                             )
 
-        print(f"Order Placed. order_id={order_id}")
+        print_log(f"Order Placed. order_id={order_id}")
         return order_id
+    
     except Exception as e:
-        print(f"place_order(): Error placing order. {e}")
+        print_log(f"place_order(): Error placing order. {e}")
 
 
-def process_orders(place_call_orders=False):
+def process_orders(flg_place_call_orders=False):
     '''Check the status of orders/squareoff/add positions'''
 
-    print("In process_orders():")
+    print_log("In process_orders():")
 
     mtm = 0
     pos = 0
 
     # Check MTM price with the actual on portal
-    df_pos = get_positions() 
-    print(f"df_pos={df_pos}")
+    df_pos = get_positions()
+    # print_log(f"df_pos={df_pos}")
     
-    if df_pos.empty:
-        print("No Positions found.")
-        if place_call_orders:
-            # Refresh call and put 
-            get_options()
-            place_call_orders()
+    pos = min(df_pos.quantity)
+    # Check if there are no open positions
+    if pos == -1:
+        # Error already printed in the get_positions() function
+        pass
+
+    elif pos == 0:
+        print_log("No Positions found. New orders will be placed")
+        if flg_place_call_orders:
+            get_options()           # Refresh call and put to be traded into the global variables
+            place_call_orders()     # Place orders
 
     else:
+        # Check if profit/loss target achieved
+        net_margin_utilised = sum(abs(df_pos.quantity/50)*nifty_avg_margin_req_per_lot)
+        profit_target = round(net_margin_utilised * (profit_target_perc/100))
+        mtm = sum(df_pos.mtm)
 
-        mtm , pos = df_pos.loc[0,['m2m','quantity']]   # Get MTM and Net Positon
-        
-        print(f"pos={pos}")
+        # position/quantity will be applicable for each symbol
+        print_log(f"Existing position available. mtm={mtm}, net_margin_utilised={net_margin_utilised}, profit_target={profit_target}")
 
-
-        if abs(pos)>0:
-
-            # net_margin_utilised = round(pd.DataFrame(kite.margins()).equity.utilised.get('debits')) 
-            # Using the below as kite considers the margins blocked for open orders as well
-            net_margin_utilised =  (abs(pos)/50) * 100000   # lot size to be parameterised for nifty/bank
             
-            profit_target = round(net_margin_utilised * (profit_target_perc/100))
-            print(f"mtm={mtm}, pos={pos}, net_margin_utilised={net_margin_utilised}, profit_target={profit_target}")
-            
-            if mtm > profit_target:
-                # Squareoff 80% (In Case of Large Qtys) of the positions 
-                print("mtm > profit_target; Squareoff")
-                df_SqOff = pd.DataFrame(kite.positions().get('net'))[['tradingsymbol','m2m','quantity']]
-                for indx in df_SqOff.index:
-                    symbol = df_SqOff['tradingsymbol'][indx]
-                    qty = df_SqOff['quantity'][indx] * -1
-                    print(f"Placing Squareoff order for symbol={symbol},qty={qty}")
-                    place_order(symbol,qty,kite.TRANSACTION_TYPE_BUY,kite.ORDER_TYPE_MARKET,None,"Algo")
+        if mtm > profit_target:
+            # Squareoff 80% (In Case of Large Qtys) of the positions 
+            print_log("mtm > profit_target; Squareoff")
+            # df_SqOff = pd.DataFrame(kite.positions().get('net'))[['tradingsymbol','m2m','quantity']]
+            for indx in df_pos.index:
+                tradingsymbol = df_pos['tradingsymbol'][indx]
+                qty = df_pos['quantity'][indx] * -1
+                print_log(f"tradingsymbol={tradingsymbol}, qty={qty}")
+                
+                # Square off only options
+                if tradingsymbol[-2:] in ('CE','PE') and (abs(qty)>0):
+                    print_log(f"Placing Squareoff order for tradingsymbol={tradingsymbol}, qty={qty}")
+                    place_order(tradingsymbol,qty,kite.TRANSACTION_TYPE_BUY,kite.ORDER_TYPE_MARKET,None,"Algo")
 
-                print("All Positions Squared Off. Exiting Algo...")
-                exit_algo()
-            else:
-                    # Check if loss needs to be booked
-                    current_mtm_perc = round((mtm / net_margin_utilised)*100,1)
-                    print(f"current_mtm_perc={current_mtm_perc}, loss_limit_perc={loss_limit_perc}")
-                    
-                    if current_mtm_perc < 0:
-                        if abs(current_mtm_perc) > loss_limit_perc:
-                            print(f"Book Loss.(Placeholder Only)")
-        
+            print_log("All Positions Squared Off")
+            # exit_algo()
         else:
-            print("No Active Positions Found")
-
+                # Check if loss needs to be booked
+                current_mtm_perc = round((mtm / net_margin_utilised)*100,1)
+                print_log(f"MTM less than target profit. current_mtm_perc={current_mtm_perc}, loss_limit_perc={loss_limit_perc}")
+                
+                if current_mtm_perc < 0:
+                    if abs(current_mtm_perc) > loss_limit_perc:
+                        print_log(f"Book Loss.(Placeholder Only)")
+                    else:
+                        # Apply Mean Reversion
+                        # Check if order is alredy there and pending
+                        print_log(f"Apply Mean Reversion orders if not already present")
+                            
 
 def get_positions():
-    '''Returns dataframe columns (m2m,quantity) with net values'''
-    print("In get_positions():")
+    '''Returns dataframe columns (m2m,quantity) with net values for Options only'''
+    print_log("In get_positions():")
 
-    # Calculae mtm manually as the m2m is 2-3 mins delayed as per public
-
-    mtm = 0.0
-    qty = 0
+    # Calculae mtm manually as the m2m is 2-3 mins delayed in kite as per public
     try:
         # return pd.DataFrame(kite.positions().get('net'))[['m2m','quantity']].sum()
         dict_positions = kite.positions()["net"]
+        
+        if len(dict_positions)>0:
 
-        for pos in dict_positions:
-            mtm = mtm + ( float(pos["sell_value"]) - float(pos["buy_value"]) ) + ( float(pos["quantity"]) * float(pos["last_price"]) * float(pos["multiplier"]))
-            qty = qty + int(pos["quantity"])
-            print(pos["tradingsymbol"],mtm,qty)
+            # print_log(f"dict_positions=\n{dict_positions}")
+            df_pos = pd.DataFrame(dict_positions)[['tradingsymbol', 'exchange', 'instrument_token','quantity','sell_value','buy_value','last_price','multiplier']]
 
-        return pd.DataFrame([[mtm,qty]],columns = ['m2m', 'quantity'])
+            df_pos["mtm"] = ( df_pos.sell_value - df_pos.buy_value ) + (df_pos.quantity * df_pos.last_price * df_pos.multiplier)
+
+
+            # for pos in dict_positions:
+            #     mtm = mtm + ( float(pos["sell_value"]) - float(pos["buy_value"]) ) + ( float(pos["quantity"]) * float(pos["last_price"]) * float(pos["multiplier"]))
+            #     qty = qty + int(pos["quantity"])
+            #     print_log(f"Kite m2m={pos['m2m']}")
+            #     print_log(f"Calculated(ts,mtm,qty) = {pos['tradingsymbol']}, {mtm}, {qty}")
+
+            # return pd.DataFrame([[mtm,qty]],columns = ['m2m', 'quantity'])
+            return df_pos[['tradingsymbol','quantity','mtm']]
+        else:
+            # Return zero as quantity if there are no position
+            return pd.DataFrame([[0]],columns=['quantity']) 
 
     except Exception as ex:
-        print(f"Unable to fetch positions(m2m and qty) dataframe. Error : {ex}")
-        return pd.DataFrame()
+        print_log(f"Unable to fetch positions dataframe. Error : {ex}")
+        return pd.DataFrame([[-1]],columns=['quantity'])   # Return empty dataframe
 
 
+# Check if the stdout resetting works or not else remove this funciton
 def exit_algo(): 
-    print("In exit_algo():")
+    print_log("In exit_algo(): Resetting stdout and stderr before exit")
+
     # Reset stdout and std error
     sys.stdout = sys.__stdout__
     sys.stderr = sys.__stderr__
@@ -395,10 +479,7 @@ def exit_algo():
 #     transaction_type=kite.TRANSACTION_TYPE_SELL,quantity=qty,
 #     product=kite.PRODUCT_NRML,order_type=kite.ORDER_TYPE_LIMIT,price=limit_price,validity=kite.VALIDITY_DAY,tag=tag)
 
-# print(f"Order Placed. order_id={order_id}")
-
-# Get current tradable Option details. Can be used during anytime of the day   
-# get_options()
+# print_log(f"Order Placed. order_id={order_id}")
 
 
 ######## Strategy 1: Sell both CE and PE
@@ -406,17 +487,15 @@ def exit_algo():
 # Place 
 
 ######## Strategy 2: Sell CE at pivot resistance points , R2(qty=baselot) , R3(qty=baselot*2), R3(qty=baselot*3)
-cur_HHMM = int(datetime.datetime.now().strftime("%H%M"))
-previous_min = 0
-print(f"cur_HHMM={cur_HHMM}")
 
 get_options()
 
-process_orders()
 
-sys.exit(0)
+cur_HHMM = int(datetime.datetime.now().strftime("%H%M"))
+previous_min = 0
+print_log(f"Processing in {interval} min(s) interval loop... {cur_HHMM}")
 
-# exit_algo()
+stratgy1_flg = False
 
 # Process as per start and end of market timing
 while cur_HHMM > 914 and cur_HHMM < 1532:
@@ -425,27 +504,30 @@ while cur_HHMM > 914 and cur_HHMM < 1532:
     
     cur_min = datetime.datetime.now().minute 
     
-    print(f"cur_min={cur_min}",flush=True)
+    # print_log(f"cur_min={cur_min}",flush=True)
     # Below if block will run after every time interval specifie in the .ini file. Used fo OHLC calculation if needed
     if( cur_min % interval == 0 and previous_min != cur_min):
-        flg_min = cur_min     # Set the minute flag to run the code only once post the interval
+        previous_min = cur_min     # Set the minute flag to run the code only once post the interval
         t1 = time.time()      # Set timer to record the processing time of all the indicators
 
-        process_orders()
+        if stratgy1_entry_time == cur_HHMM and stratgy1_flg == False:
+            stratgy1_flg = True
+            process_orders(True)    # Place CE orders if required which should be done at 10.30 AM or so
+        else:
+            process_orders()
 
         # Find processing time and Log only if processing takes more than 2 seconds
         t2 = time.time() - t1
-        print(f"t2={t2:.2f}")
+        print_log(f"Processing Time(secs) = {t2:.2f}")
+        # print_log(f"previous_min={previous_min} cur_min={cur_min} cur_HHMM={cur_HHMM} : Processing Time={t2:.2f}")
         if t2 > 2.0: 
-            print(f"Processing time(secs)= {t2:.2f}")
+            print_log(f"Alert! Increased Processing time(secs) = {t2:.2f}")
 
 
     # # Run short strangle strategy
     # if (cur_HHMM > short_strangle_time & short_strangle_flag == False):
     #     short_strangle_flag = True
-    #     print("In Short Strangle condition.")
-
-    previous_min = cur_min
+    #     print_log("In Short Strangle condition.")
 
     cur_HHMM = int(datetime.datetime.now().strftime("%H%M"))
  
@@ -453,6 +535,6 @@ while cur_HHMM > 914 and cur_HHMM < 1532:
     time.sleep(10)   # reduce to accomodate the processing delay, if any
 
 
-print("====== Done ======", datetime.datetime.now(),flush=True)
+print_log("====== End of Program ======")
 
-exit_algo()
+# exit_algo()
