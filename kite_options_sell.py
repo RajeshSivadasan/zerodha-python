@@ -168,6 +168,21 @@ nifty_olhc = kite.ohlc(instruments[0])
 # print_log(f"nifty_opt_ohlc={nifty_opt_ohlc}")
 # print_log(f"nifty_olhc={nifty_olhc}")
 
+
+# Get Nifty ATM
+inst_ltp = kite.ltp(instruments)
+nifty_ltp = inst_ltp['NSE:NIFTY 50']['last_price']
+nifty_atm = round(int(nifty_ltp),-2)
+
+# Prepare the list of option stikes for entry 
+#--------------------------------------------
+# Get list of +- 500 stikes to filter the required price range strike
+# Get list of CE/PE rounded strikes 500 pts on either side of the ATM from option chain
+lst_nifty_opt = df[(df.name=='NIFTY') & ((df.strike>=nifty_atm-600) & (df.strike<=nifty_atm+600)) & (df.strike%100==0) ].tradingsymbol.apply(lambda x:'NFO:'+x).tolist()
+df = []
+
+
+
 # Dictionary to store single row of call /  put option details
 dict_nifty_ce = {}
 dict_nifty_pe = {}
@@ -220,17 +235,6 @@ def get_options():
 
     print_log("In get_options():")
 
-    # Get Nifty ATM
-    inst_ltp = kite.ltp(instruments)
-    nifty_ltp = inst_ltp['NSE:NIFTY 50']['last_price']
-    nifty_atm = round(int(nifty_ltp),-2)
-
-    # Find option stike for entry 
-    #----------------------------
-
-    # Get list of +- 500 stikes to filter the required price range strike
-    # Get list of CE/PE rounded strikes 500 pts on either side of the ATM from option chain
-    lst_nifty_opt = df[(df.name=='NIFTY') & ((df.strike>=nifty_atm-500) & (df.strike<=nifty_atm+500)) & (df.strike%100==0) ].tradingsymbol.apply(lambda x:'NFO:'+x).tolist()
 
     # Get ltp for the list of filtered CE/PE strikes 
     dict_nifty_opt_ltp = kite.ltp(lst_nifty_opt)
@@ -288,7 +292,7 @@ def place_call_orders():
     else:
         if sum(df_orders.status=='OPEN') > 0: 
             print_log("Open Orders found. No orders will be placed.")
-            print_log(df_orders)
+            # print_log(df_orders)
             return
 
     last_price = dict_nifty_ce["last_price"]
@@ -500,7 +504,7 @@ stratgy1_flg = False
 # Process as per start and end of market timing
 while cur_HHMM > 914 and cur_HHMM < 1532:
 # while True:
-
+    
     
     cur_min = datetime.datetime.now().minute 
     
@@ -530,9 +534,10 @@ while cur_HHMM > 914 and cur_HHMM < 1532:
     #     print_log("In Short Strangle condition.")
 
     cur_HHMM = int(datetime.datetime.now().strftime("%H%M"))
- 
 
     time.sleep(10)   # reduce to accomodate the processing delay, if any
+
+    # print(".",end="",flush=True)    
 
 
 print_log("====== End of Program ======")
