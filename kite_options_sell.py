@@ -1,4 +1,3 @@
-
 # To get a list of latest instruments as csv dump, type in browser the below url:
 # https://api.kite.trade/instruments
 
@@ -55,22 +54,27 @@ import os
 import sys
 import configparser
 import pandas as pd
+import requests
 # from kiteconnect import KiteTicker    # Used for websocket only
 
-
-def print_log(*args):
-    strMsg = ""
-    for arg in args:
-        strMsg = strMsg + str(arg)
+# For Logging and send messages to Telegram
+def iLog(strMsg,sendTeleMsg=False):
     print(f"{datetime.datetime.now()}|{strMsg}",flush=True)
+    if sendTeleMsg :
+        try:
+            requests.get("https://api.telegram.org/"+strBotToken+"/sendMessage?chat_id="+strChatID+"&text="+strMsg)
+        except:
+            iLog("Telegram message failed."+strMsg)
+
+
 
 # If log folder is not present create it
 if not os.path.exists("./log"):
     os.makedirs("./log")
 
+
 # Initialise logging and set console and error target as log file
 LOG_FILE = r"./log/kite_options_sell_" + datetime.datetime.now().strftime("%Y%m%d") +".log"
-print_log(f"Logging to file :{LOG_FILE}")
 # Uncomment below code to get the logs into the logfile 
 # sys.stdout = sys.stderr = open(LOG_FILE, "a") # use flush=True parameter in print statement if values are not seen in log file
 
@@ -87,6 +91,13 @@ cfg.read(INI_FILE)
 user_id = cfg.get("tokens", "user_id")
 password = cfg.get("tokens", "password")
 totp_key = cfg.get("tokens", "totp_key")
+
+strChatID = cfg.get("tokens", "chat_id")
+strBotToken = cfg.get("tokens", "options_bot_token")    #Bot include "bot" prefix in the token
+
+# Kept the below line here as telegram bot token is read from the .ini file in the above line 
+iLog("====== Starting Algo ======",True)
+iLog(f"Logging to file :{LOG_FILE}",True)
 
 nifty_ce_max_price_limit = int(cfg.get("info", "nifty_ce_max_price_limit")) # 105
 nifty_pe_max_price_limit = int(cfg.get("info", "nifty_pe_max_price_limit")) # 105
@@ -121,7 +132,7 @@ all_variables = f"user_id={user_id} interval={interval} profit_target_perc={prof
     f"stratgy1_entry_time={stratgy1_entry_time} nifty_opt_base_lot={nifty_opt_base_lot}"\
     f"nifty_ce_max_price_limit={nifty_ce_max_price_limit} nifty_pe_max_price_limit={nifty_pe_max_price_limit} \n***virtual_trade={virtual_trade}"
 
-print_log("Settings used : " + all_variables)
+iLog("Settings used : " + all_variables,True)
 
 # Get NIfty and BankNifty instrument data
 instruments = ["NSE:NIFTY 50","NSE:NIFTY BANK"] 
@@ -136,7 +147,7 @@ twoFA = f"{int(totp):06d}" if len(totp) <=5 else totp   # Suffix zeros if length
 
 # Authenticate using kite bypass and get Kite object
 kite = KiteExt(user_id=user_id, password=password, twofa=twoFA)
-# print_log(f"totp={twoFA}")
+# iLog(f"totp={twoFA}")
 
 
 
@@ -151,7 +162,7 @@ else:
 if str(expiry_date) in weekly_expiry_holiday_dates :
     expiry_date = expiry_date - datetime.timedelta(days=1)
 
-print_log(f"expiry_date = {expiry_date}")
+iLog(f"expiry_date = {expiry_date}")
 
 
 # Get option instruments for the expiry
@@ -163,10 +174,10 @@ df = df[(df.segment=='NFO-OPT') & (df.expiry==expiry_date)]
 nifty_olhc = kite.ohlc(instruments[0])
 # WIP - Need to work on this
 
-# print_log(f"opt_instrument={opt_instrument}")
-# print_log(f"nifty_opt_ltp={nifty_opt_ltp}")
-# print_log(f"nifty_opt_ohlc={nifty_opt_ohlc}")
-# print_log(f"nifty_olhc={nifty_olhc}")
+# iLog(f"opt_instrument={opt_instrument}")
+# iLog(f"nifty_opt_ltp={nifty_opt_ltp}")
+# iLog(f"nifty_opt_ohlc={nifty_opt_ohlc}")
+# iLog(f"nifty_olhc={nifty_olhc}")
 
 
 # Get Nifty ATM
@@ -191,6 +202,7 @@ dict_nifty_pe = {}
 ########################################################
 #        Declare Functions
 ########################################################
+
 def get_pivot_points(instrument_token):
     ''' Returns Pivot points dictionary for a given instrument token using previous day vaues
     '''
@@ -215,14 +227,14 @@ def get_pivot_points(instrument_token):
         dict_ohlc["s2"] = s2 = round(pp - (r1 - s1))
         dict_ohlc["s3"] = s3 = round(pp - 2 * (last_high - last_low))
 
-        print_log(f"Pivot Points for {instrument_token} : {s1}(s1) {s2}(s2) {s3}(s3) {pp}(pp) {r1}(r1) {r2}(r2) {r3}(r3) {r4}(r4)")
+        iLog(f"Pivot Points for {instrument_token} : {s1}(s1) {s2}(s2) {s3}(s3) {pp}(pp) {r1}(r1) {r2}(r2) {r3}(r3) {r4}(r4)")
         
         dict_ohlc["instrument_token"] = instrument_token
 
         return dict_ohlc
 
     except Exception as ex:
-        print_log(f"Unable to fetch pivor points for token {instrument_token}. Error : {ex}")
+        iLog(f"Unable to fetch pivor points for token {instrument_token}. Error : {ex}")
         return {}
 
 
@@ -233,7 +245,7 @@ def get_options():
     '''
     global dict_nifty_ce, dict_nifty_pe
 
-    print_log("In get_options():")
+    iLog("In get_options():")
 
 
     # Get ltp for the list of filtered CE/PE strikes 
@@ -250,8 +262,8 @@ def get_options():
     df_nifty_opt_pe = df_nifty_opt[(df_nifty_opt.type=='PE') & (df_nifty_opt.last_price==df_nifty_opt[(df_nifty_opt.type=='PE') & (df_nifty_opt.last_price<=nifty_pe_max_price_limit)].last_price.max())]
 
 
-    print_log(f"Call selected is : {df_nifty_opt_ce.tradingsymbol[-1]}({df_nifty_opt_ce.instrument_token[-1]}) last_price = {df_nifty_opt_ce.last_price[-1]}")
-    print_log(f"Put  selected is : {df_nifty_opt_pe.tradingsymbol[-1]}({df_nifty_opt_pe.instrument_token[-1]}) last_price = {df_nifty_opt_pe.last_price[-1]}")
+    iLog(f"Call selected is : {df_nifty_opt_ce.tradingsymbol[-1]}({df_nifty_opt_ce.instrument_token[-1]}) last_price = {df_nifty_opt_ce.last_price[-1]}")
+    iLog(f"Put  selected is : {df_nifty_opt_pe.tradingsymbol[-1]}({df_nifty_opt_pe.instrument_token[-1]}) last_price = {df_nifty_opt_pe.last_price[-1]}")
 
 
     # Get CE instrument token (instrument_token)
@@ -264,23 +276,23 @@ def get_options():
     # Get pivot points for the selected instrument
     dict_pivot = get_pivot_points(instrument_token_ce)
 
-    # print_log("dict_pivot=",dict_pivot)
+    # iLog("dict_pivot=",dict_pivot)
 
     if dict_pivot:
         dict_nifty_ce = dict_pivot
         # update the ltp and tradingsymbol
         dict_nifty_ce["last_price"] = kite.ltp(instrument_token_ce)[instrument_token_ce]['last_price']
         dict_nifty_ce["tradingsymbol"] = df_nifty_opt_ce.tradingsymbol[-1]
-        # print_log("dict_nifty_ce:=",dict_nifty_ce)
+        # iLog("dict_nifty_ce:=",dict_nifty_ce)
     
     else:
-        print_log(f"Unable to get Pivot points for {instrument_token_ce}")
+        iLog(f"Unable to get Pivot points for {instrument_token_ce}")
     
 
-def place_call_orders():
+def place_call_orders(flgMeanReversion=False):
     ''' Place call orders and targets based on pivots/levels '''
 
-    print_log("In place_call_orders():")
+    iLog("In place_call_orders():")
 
     # Get open orders
     df_orders = pd.DataFrame(kite.orders())
@@ -291,47 +303,85 @@ def place_call_orders():
     
     else:
         if sum(df_orders.status=='OPEN') > 0: 
-            print_log("Open Orders found. No orders will be placed.")
-            # print_log(df_orders)
+            iLog("Open Orders found. No orders will be placed.")
+            # iLog(df_orders)
             return
 
     last_price = dict_nifty_ce["last_price"]
     tradingsymbol = dict_nifty_ce["tradingsymbol"]
     qty = nifty_opt_base_lot * nifty_opt_per_lot_qty
 
-    # rng = (dict_nifty_ce["r2"] - dict_nifty_ce["r1"])/2
-    if dict_nifty_ce["s2"] <= last_price < dict_nifty_ce["s1"] :
-        place_order(tradingsymbol,qty,float(dict_nifty_ce["s1"]))
-        place_order(tradingsymbol,qty,float(dict_nifty_ce["pp"]))
-        place_order(tradingsymbol,qty,float(dict_nifty_ce["r1"]))
-        place_order(tradingsymbol,qty,float(dict_nifty_ce["r2"]))
-        place_order(tradingsymbol,qty,float(dict_nifty_ce["r3"]))
-        place_order(tradingsymbol,qty,float(dict_nifty_ce["r4"]))
+    if flgMeanReversion:
+        iLog("Placing orders for Mean Reversion")
+        # rng = (dict_nifty_ce["r2"] - dict_nifty_ce["r1"])/2
+        if dict_nifty_ce["s2"] <= last_price < dict_nifty_ce["s1"] :
+            # place_order(tradingsymbol,qty,float(dict_nifty_ce["s1"]))
+            # place_order(tradingsymbol,qty,float(dict_nifty_ce["pp"]))
+            place_order(tradingsymbol,qty,float(dict_nifty_ce["r1"]))
+            place_order(tradingsymbol,qty,float(dict_nifty_ce["r2"]))
+            place_order(tradingsymbol,qty,float(dict_nifty_ce["r3"]))
+            place_order(tradingsymbol,qty,float(dict_nifty_ce["r4"]))
 
-    elif dict_nifty_ce["s1"] <= last_price < dict_nifty_ce["pp"] :
-        place_order(tradingsymbol,qty,float(dict_nifty_ce["pp"]))
-        place_order(tradingsymbol,qty,float(dict_nifty_ce["r1"]))
-        place_order(tradingsymbol,qty,float(dict_nifty_ce["r2"]))
-        place_order(tradingsymbol,qty,float(dict_nifty_ce["r3"]))
-        place_order(tradingsymbol,qty,float(dict_nifty_ce["r4"]))
+        elif dict_nifty_ce["s1"] <= last_price < dict_nifty_ce["pp"] :
+            # place_order(tradingsymbol,qty,float(dict_nifty_ce["pp"]))
+            # place_order(tradingsymbol,qty,float(dict_nifty_ce["r1"]))
+            place_order(tradingsymbol,qty,float(dict_nifty_ce["r2"]))
+            place_order(tradingsymbol,qty,float(dict_nifty_ce["r3"]))
+            place_order(tradingsymbol,qty,float(dict_nifty_ce["r4"]))
 
-    elif dict_nifty_ce["pp"] <= last_price < dict_nifty_ce["r1"] :
-        place_order(tradingsymbol,qty,float(dict_nifty_ce["r1"]))
-        place_order(tradingsymbol,qty,float(dict_nifty_ce["r2"]))
-        place_order(tradingsymbol,qty,float(dict_nifty_ce["r3"]))
-        place_order(tradingsymbol,qty,float(dict_nifty_ce["r4"]))
+        elif dict_nifty_ce["pp"] <= last_price < dict_nifty_ce["r1"] :
+            # place_order(tradingsymbol,qty,float(dict_nifty_ce["r1"]))
+            # place_order(tradingsymbol,qty,float(dict_nifty_ce["r2"]))
+            place_order(tradingsymbol,qty,float(dict_nifty_ce["r3"]))
+            place_order(tradingsymbol,qty,float(dict_nifty_ce["r4"]))
 
-    elif dict_nifty_ce["r1"] <= last_price < dict_nifty_ce["r2"] :
-        place_order(tradingsymbol,qty,float(dict_nifty_ce["r2"]))
-        place_order(tradingsymbol,qty,float(dict_nifty_ce["r3"]))
-        place_order(tradingsymbol,qty,float(dict_nifty_ce["r4"]))
+        elif dict_nifty_ce["r1"] <= last_price < dict_nifty_ce["r2"] :
+            # place_order(tradingsymbol,qty,float(dict_nifty_ce["r2"]))
+            # place_order(tradingsymbol,qty,float(dict_nifty_ce["r3"]))
+            place_order(tradingsymbol,qty,float(dict_nifty_ce["r4"]))
 
-    elif dict_nifty_ce["r2"] <= last_price < dict_nifty_ce["r3"] :
-        place_order(tradingsymbol,qty,float(dict_nifty_ce["r3"]))
-        place_order(tradingsymbol,qty,float(dict_nifty_ce["r4"]))
+        elif dict_nifty_ce["r2"] <= last_price < dict_nifty_ce["r3"] :
+            # place_order(tradingsymbol,qty,float(dict_nifty_ce["r3"]))
+            place_order(tradingsymbol,qty,float(dict_nifty_ce["r4"]))
 
+        else:
+            iLog(f"Unable to find pivots and place order for {tradingsymbol}")
+        
     else:
-        print_log(f"Unable to find pivots and place order for {tradingsymbol}")
+    
+        # rng = (dict_nifty_ce["r2"] - dict_nifty_ce["r1"])/2
+        if dict_nifty_ce["s2"] <= last_price < dict_nifty_ce["s1"] :
+            place_order(tradingsymbol,qty,float(dict_nifty_ce["s1"]))
+            place_order(tradingsymbol,qty,float(dict_nifty_ce["pp"]))
+            place_order(tradingsymbol,qty,float(dict_nifty_ce["r1"]))
+            place_order(tradingsymbol,qty,float(dict_nifty_ce["r2"]))
+            place_order(tradingsymbol,qty,float(dict_nifty_ce["r3"]))
+            place_order(tradingsymbol,qty,float(dict_nifty_ce["r4"]))
+
+        elif dict_nifty_ce["s1"] <= last_price < dict_nifty_ce["pp"] :
+            place_order(tradingsymbol,qty,float(dict_nifty_ce["pp"]))
+            place_order(tradingsymbol,qty,float(dict_nifty_ce["r1"]))
+            place_order(tradingsymbol,qty,float(dict_nifty_ce["r2"]))
+            place_order(tradingsymbol,qty,float(dict_nifty_ce["r3"]))
+            place_order(tradingsymbol,qty,float(dict_nifty_ce["r4"]))
+
+        elif dict_nifty_ce["pp"] <= last_price < dict_nifty_ce["r1"] :
+            place_order(tradingsymbol,qty,float(dict_nifty_ce["r1"]))
+            place_order(tradingsymbol,qty,float(dict_nifty_ce["r2"]))
+            place_order(tradingsymbol,qty,float(dict_nifty_ce["r3"]))
+            place_order(tradingsymbol,qty,float(dict_nifty_ce["r4"]))
+
+        elif dict_nifty_ce["r1"] <= last_price < dict_nifty_ce["r2"] :
+            place_order(tradingsymbol,qty,float(dict_nifty_ce["r2"]))
+            place_order(tradingsymbol,qty,float(dict_nifty_ce["r3"]))
+            place_order(tradingsymbol,qty,float(dict_nifty_ce["r4"]))
+
+        elif dict_nifty_ce["r2"] <= last_price < dict_nifty_ce["r3"] :
+            place_order(tradingsymbol,qty,float(dict_nifty_ce["r3"]))
+            place_order(tradingsymbol,qty,float(dict_nifty_ce["r4"]))
+
+        else:
+            iLog(f"Unable to find pivots and place order for {tradingsymbol}")
 
 
 def runShortStrangle():
@@ -340,9 +390,11 @@ def runShortStrangle():
 
 def place_order(tradingsymbol,qty,limit_price=None,transaction_type=kite.TRANSACTION_TYPE_SELL,order_type=kite.ORDER_TYPE_LIMIT,tag="Algo"):
     if virtual_trade:
-        print_log(f"Virtual Order Placed : tradingsymbol={tradingsymbol}, qty={qty}, limit_price={limit_price}, transaction_type={transaction_type}")
+        iLog(f"Placing virtual order : tradingsymbol={tradingsymbol}, qty={qty}, limit_price={limit_price}, transaction_type={transaction_type}",True )
         return 
-
+    else:
+        iLog(f"Placing order : tradingsymbol={tradingsymbol}, qty={qty}, limit_price={limit_price}, transaction_type={transaction_type}",True)
+    
     # If not virtual trade, execute order on exchange
     try:
         order_id = kite.place_order(variety=kite.VARIETY_REGULAR,
@@ -357,24 +409,24 @@ def place_order(tradingsymbol,qty,limit_price=None,transaction_type=kite.TRANSAC
                             tag=tag
                             )
 
-        print_log(f"Order Placed. order_id={order_id}")
+        iLog(f"Order Placed. order_id={order_id}")
         return order_id
     
     except Exception as e:
-        print_log(f"place_order(): Error placing order. {e}")
+        iLog(f"place_order(): Error placing order. {e}")
 
 
 def process_orders(flg_place_call_orders=False):
     '''Check the status of orders/squareoff/add positions'''
 
-    print_log("In process_orders():")
+    iLog("In process_orders():")
 
     mtm = 0
     pos = 0
 
     # Check MTM price with the actual on portal
     df_pos = get_positions()
-    # print_log(f"df_pos={df_pos}")
+    # iLog(f"df_pos={df_pos}")
     
     pos = min(df_pos.quantity)
     # Check if there are no open positions
@@ -383,11 +435,12 @@ def process_orders(flg_place_call_orders=False):
         pass
 
     elif pos == 0:
-        print_log("No Positions found. New orders will be placed")
         if flg_place_call_orders:
+            iLog("No Positions found. New orders will be placed")
             get_options()           # Refresh call and put to be traded into the global variables
-            place_call_orders()     # Place orders
-
+            place_call_orders()     # Place orders as per the stratefy designated time in the parameter 
+        else:
+            iLog("No Positions found. New orders will NOT be placed as strategy1 time not met.")
     else:
         # Check if profit/loss target achieved
         net_margin_utilised = sum(abs(df_pos.quantity/50)*nifty_avg_margin_req_per_lot)
@@ -395,42 +448,45 @@ def process_orders(flg_place_call_orders=False):
         mtm = sum(df_pos.mtm)
 
         # position/quantity will be applicable for each symbol
-        print_log(f"Existing position available. mtm={mtm}, net_margin_utilised={net_margin_utilised}, profit_target={profit_target}")
+        iLog(f"Existing position available. mtm={mtm}, approx. net_margin_utilised={net_margin_utilised}, profit_target={profit_target}",True)
 
-            
+        
         if mtm > profit_target:
             # Squareoff 80% (In Case of Large Qtys) of the positions 
-            print_log("mtm > profit_target; Squareoff")
+            iLog("mtm > profit_target; Squareoff")
             # df_SqOff = pd.DataFrame(kite.positions().get('net'))[['tradingsymbol','m2m','quantity']]
             for indx in df_pos.index:
                 tradingsymbol = df_pos['tradingsymbol'][indx]
                 qty = df_pos['quantity'][indx] * -1
-                print_log(f"tradingsymbol={tradingsymbol}, qty={qty}")
+                iLog(f"tradingsymbol={tradingsymbol}, qty={qty}")
                 
                 # Square off only options
                 if tradingsymbol[-2:] in ('CE','PE') and (abs(qty)>0):
-                    print_log(f"Placing Squareoff order for tradingsymbol={tradingsymbol}, qty={qty}")
+                    iLog(f"Placing Squareoff order for tradingsymbol={tradingsymbol}, qty={qty}",True)
                     place_order(tradingsymbol,qty,kite.TRANSACTION_TYPE_BUY,kite.ORDER_TYPE_MARKET,None,"Algo")
 
-            print_log("All Positions Squared Off")
+            iLog("All Positions Squared Off")
             # exit_algo()
         else:
                 # Check if loss needs to be booked
                 current_mtm_perc = round((mtm / net_margin_utilised)*100,1)
-                print_log(f"MTM less than target profit. current_mtm_perc={current_mtm_perc}, loss_limit_perc={loss_limit_perc}")
+                iLog(f"MTM less than target profit. current_mtm_perc={current_mtm_perc}, loss_limit_perc={loss_limit_perc}",True)
                 
                 if current_mtm_perc < 0:
                     if abs(current_mtm_perc) > loss_limit_perc:
-                        print_log(f"Book Loss.(Placeholder Only)")
+                        iLog(f"Book Loss.(Placeholder Only)")
                     else:
                         # Apply Mean Reversion
                         # Check if order is alredy there and pending
-                        print_log(f"Apply Mean Reversion orders if not already present")
-                            
+                        iLog(f"Apply Mean Reversion orders if not already present")
+                
+                # Place mean reversion orders irrespective of profit target achieved
+                place_call_orders(True)
+
 
 def get_positions():
     '''Returns dataframe columns (m2m,quantity) with net values for Options only'''
-    print_log("In get_positions():")
+    iLog("In get_positions():")
 
     # Calculae mtm manually as the m2m is 2-3 mins delayed in kite as per public
     try:
@@ -439,7 +495,7 @@ def get_positions():
         
         if len(dict_positions)>0:
 
-            # print_log(f"dict_positions=\n{dict_positions}")
+            # iLog(f"dict_positions=\n{dict_positions}")
             df_pos = pd.DataFrame(dict_positions)[['tradingsymbol', 'exchange', 'instrument_token','quantity','sell_value','buy_value','last_price','multiplier']]
 
             df_pos["mtm"] = ( df_pos.sell_value - df_pos.buy_value ) + (df_pos.quantity * df_pos.last_price * df_pos.multiplier)
@@ -448,8 +504,8 @@ def get_positions():
             # for pos in dict_positions:
             #     mtm = mtm + ( float(pos["sell_value"]) - float(pos["buy_value"]) ) + ( float(pos["quantity"]) * float(pos["last_price"]) * float(pos["multiplier"]))
             #     qty = qty + int(pos["quantity"])
-            #     print_log(f"Kite m2m={pos['m2m']}")
-            #     print_log(f"Calculated(ts,mtm,qty) = {pos['tradingsymbol']}, {mtm}, {qty}")
+            #     iLog(f"Kite m2m={pos['m2m']}")
+            #     iLog(f"Calculated(ts,mtm,qty) = {pos['tradingsymbol']}, {mtm}, {qty}")
 
             # return pd.DataFrame([[mtm,qty]],columns = ['m2m', 'quantity'])
             return df_pos[['tradingsymbol','quantity','mtm']]
@@ -458,13 +514,13 @@ def get_positions():
             return pd.DataFrame([[0]],columns=['quantity']) 
 
     except Exception as ex:
-        print_log(f"Unable to fetch positions dataframe. Error : {ex}")
+        iLog(f"Unable to fetch positions dataframe. Error : {ex}")
         return pd.DataFrame([[-1]],columns=['quantity'])   # Return empty dataframe
 
 
 # Check if the stdout resetting works or not else remove this funciton
 def exit_algo(): 
-    print_log("In exit_algo(): Resetting stdout and stderr before exit")
+    iLog("In exit_algo(): Resetting stdout and stderr before exit")
 
     # Reset stdout and std error
     sys.stdout = sys.__stdout__
@@ -483,7 +539,7 @@ def exit_algo():
 #     transaction_type=kite.TRANSACTION_TYPE_SELL,quantity=qty,
 #     product=kite.PRODUCT_NRML,order_type=kite.ORDER_TYPE_LIMIT,price=limit_price,validity=kite.VALIDITY_DAY,tag=tag)
 
-# print_log(f"Order Placed. order_id={order_id}")
+# iLog(f"Order Placed. order_id={order_id}")
 
 
 ######## Strategy 1: Sell both CE and PE
@@ -497,18 +553,18 @@ get_options()
 
 cur_HHMM = int(datetime.datetime.now().strftime("%H%M"))
 previous_min = 0
-print_log(f"Processing in {interval} min(s) interval loop... {cur_HHMM}")
+iLog(f"Processing in {interval} min(s) interval loop... {cur_HHMM}",True)
 
 stratgy1_flg = False
 
 # Process as per start and end of market timing
-while cur_HHMM > 914 and cur_HHMM < 1532:
+while cur_HHMM > 914 and cur_HHMM < 1531:
 # while True:
     
     
     cur_min = datetime.datetime.now().minute 
     
-    # print_log(f"cur_min={cur_min}",flush=True)
+    # iLog(f"cur_min={cur_min}",flush=True)
     # Below if block will run after every time interval specifie in the .ini file. Used fo OHLC calculation if needed
     if( cur_min % interval == 0 and previous_min != cur_min):
         previous_min = cur_min     # Set the minute flag to run the code only once post the interval
@@ -522,16 +578,16 @@ while cur_HHMM > 914 and cur_HHMM < 1532:
 
         # Find processing time and Log only if processing takes more than 2 seconds
         t2 = time.time() - t1
-        print_log(f"Processing Time(secs) = {t2:.2f}")
-        # print_log(f"previous_min={previous_min} cur_min={cur_min} cur_HHMM={cur_HHMM} : Processing Time={t2:.2f}")
+        iLog(f"Processing Time(secs) = {t2:.2f}",True)
+        # iLog(f"previous_min={previous_min} cur_min={cur_min} cur_HHMM={cur_HHMM} : Processing Time={t2:.2f}")
         if t2 > 2.0: 
-            print_log(f"Alert! Increased Processing time(secs) = {t2:.2f}")
+            iLog(f"Alert! Increased Processing time(secs) = {t2:.2f}",True)
 
 
     # # Run short strangle strategy
     # if (cur_HHMM > short_strangle_time & short_strangle_flag == False):
     #     short_strangle_flag = True
-    #     print_log("In Short Strangle condition.")
+    #     iLog("In Short Strangle condition.")
 
     cur_HHMM = int(datetime.datetime.now().strftime("%H%M"))
 
@@ -540,6 +596,6 @@ while cur_HHMM > 914 and cur_HHMM < 1532:
     # print(".",end="",flush=True)    
 
 
-print_log("====== End of Program ======")
+iLog("====== End of Algo ======",True)
 
 # exit_algo()
