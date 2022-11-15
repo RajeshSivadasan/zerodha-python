@@ -6,7 +6,7 @@ I have tried some sample programs to capture tick data using Zerodha Kite API. P
 3. getAccess_token.py - (Discontinued) Gets access token from the kite url https://kite.trade/connect/login?v=3&api_key=  
 4. GetInstrumentsDaily - Gets daily NSE instruments data through Zerodha Kite API
 
-Below is the option selling Algo (WIP):
+Below is the option selling Algo (Beta):
 ---------------------------------------
 1. kite_options_sell.py - Option Selling program based on Mean Reversion approach (wip). Please ensure that you have a working kite extension file (shared in a algo self help Telegram group https://t.me/AlgoTradeAnalysis ) 
 2. kite_options_sell.ini - This .ini file is used by the above kite_options_sell.py for picking up its parameters.
