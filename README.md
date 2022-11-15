@@ -20,3 +20,4 @@ Highlights of the algo:
   it will select next week expiry date on wed and thu and for rest of the days it will use current week expiry. 
 4. Parameter <b>profit_target_perc</b> can be specified to book the profit after certain percentage of margin is achieved in the MTM. Margin considered per lot is 1 lakh which can be also specified at the <b>nifty_avg_margin_req_per_lot</b> parameter. Using margin parameter as zerodha margin api doesn't give the correct margin of executed orders, it shows even for the open orders where margins are blocked.    
 5. The algo runs in a loop and processes the orders/books profits/loss after every x mins as specified in the <b>interval</b> parameter. Default value set to 2 (mins).   
+6. For getting the updates in Telegram chat, create a telegram bot using the botfather and ensure to start the bot. Specify the bot token in the .ini file with bot prefix and also specify your telegram chat id.
