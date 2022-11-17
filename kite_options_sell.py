@@ -105,8 +105,8 @@ nifty_pe_max_price_limit = int(cfg.get("info", "nifty_pe_max_price_limit")) # 10
 short_strangle_time = int(cfg.get("info", "short_strangle_time"))   # 925
 short_strangle_flag = False
 
-# Time interval e.g 2min, 3min, 5min, 10min ...
-interval = int(cfg.get("info", "interval"))   # 2
+# Time interval in seconds. Order processing happens after every interval seconds
+interval = int(cfg.get("info", "interval"))   # 30
 
 # profit target percentage of the utilised margin
 profit_target_perc = float(cfg.get("info", "profit_target_perc"))  # 0.1 
@@ -129,8 +129,8 @@ nifty_avg_margin_req_per_lot = int(cfg.get("info", "nifty_avg_margin_req_per_lot
 virtual_trade = int(cfg.get("info", "virtual_trade"))   # 0 = Disabled - Trades will be executed in real; 1 = Enabled - No trades will be executed on exchange
 
 all_variables = f"user_id={user_id} interval={interval} profit_target_perc={profit_target_perc} loss_limit_perc={loss_limit_perc}"\
-    f"stratgy1_entry_time={stratgy1_entry_time} nifty_opt_base_lot={nifty_opt_base_lot}"\
-    f"nifty_ce_max_price_limit={nifty_ce_max_price_limit} nifty_pe_max_price_limit={nifty_pe_max_price_limit} \n***virtual_trade={virtual_trade}"
+    f" stratgy1_entry_time={stratgy1_entry_time} nifty_opt_base_lot={nifty_opt_base_lot}"\
+    f" nifty_ce_max_price_limit={nifty_ce_max_price_limit} nifty_pe_max_price_limit={nifty_pe_max_price_limit} \n***virtual_trade={virtual_trade}"
 
 iLog("Settings used : " + all_variables,True)
 
@@ -139,7 +139,7 @@ instruments = ["NSE:NIFTY 50","NSE:NIFTY BANK"]
 
 
 
-# Login and get kite object
+# Login and get kite object 
 # -------------------------
 # Get the latest TOTP
 totp = pyotp.TOTP(totp_key).now()
@@ -227,7 +227,7 @@ def get_pivot_points(instrument_token):
         dict_ohlc["s2"] = s2 = round(pp - (r1 - s1))
         dict_ohlc["s3"] = s3 = round(pp - 2 * (last_high - last_low))
 
-        iLog(f"Pivot Points for {instrument_token} : {s1}(s1) {s2}(s2) {s3}(s3) {pp}(pp) {r1}(r1) {r2}(r2) {r3}(r3) {r4}(r4)")
+        iLog(f"Pivot Points for {instrument_token} :  {s3}(s3) {s2}(s2) {s1}(s1) {pp}(pp) {r1}(r1) {r2}(r2) {r3}(r3) {r4}(r4)")
         
         dict_ohlc["instrument_token"] = instrument_token
 
@@ -302,6 +302,7 @@ def place_call_orders(flgMeanReversion=False):
         pass
     
     else:
+        # We can check if orders of the existing positions are there or not
         if sum(df_orders.status=='OPEN') > 0: 
             iLog("Open Orders found. No orders will be placed.")
             # iLog(df_orders)
@@ -312,12 +313,14 @@ def place_call_orders(flgMeanReversion=False):
     qty = nifty_opt_base_lot * nifty_opt_per_lot_qty
 
     if flgMeanReversion:
+        # Place far pivot orders only
+        # Qty needs to be increased with each resistance level 
         iLog("Placing orders for Mean Reversion")
         # rng = (dict_nifty_ce["r2"] - dict_nifty_ce["r1"])/2
         if dict_nifty_ce["s2"] <= last_price < dict_nifty_ce["s1"] :
             # place_order(tradingsymbol,qty,float(dict_nifty_ce["s1"]))
             # place_order(tradingsymbol,qty,float(dict_nifty_ce["pp"]))
-            place_order(tradingsymbol,qty,float(dict_nifty_ce["r1"]))
+            # place_order(tradingsymbol,qty,float(dict_nifty_ce["r1"]))
             place_order(tradingsymbol,qty,float(dict_nifty_ce["r2"]))
             place_order(tradingsymbol,qty,float(dict_nifty_ce["r3"]))
             place_order(tradingsymbol,qty,float(dict_nifty_ce["r4"]))
@@ -325,7 +328,7 @@ def place_call_orders(flgMeanReversion=False):
         elif dict_nifty_ce["s1"] <= last_price < dict_nifty_ce["pp"] :
             # place_order(tradingsymbol,qty,float(dict_nifty_ce["pp"]))
             # place_order(tradingsymbol,qty,float(dict_nifty_ce["r1"]))
-            place_order(tradingsymbol,qty,float(dict_nifty_ce["r2"]))
+            # place_order(tradingsymbol,qty,float(dict_nifty_ce["r2"]))
             place_order(tradingsymbol,qty,float(dict_nifty_ce["r3"]))
             place_order(tradingsymbol,qty,float(dict_nifty_ce["r4"]))
 
@@ -337,7 +340,7 @@ def place_call_orders(flgMeanReversion=False):
 
         elif dict_nifty_ce["r1"] <= last_price < dict_nifty_ce["r2"] :
             # place_order(tradingsymbol,qty,float(dict_nifty_ce["r2"]))
-            # place_order(tradingsymbol,qty,float(dict_nifty_ce["r3"]))
+            place_order(tradingsymbol,qty,float(dict_nifty_ce["r3"]))
             place_order(tradingsymbol,qty,float(dict_nifty_ce["r4"]))
 
         elif dict_nifty_ce["r2"] <= last_price < dict_nifty_ce["r3"] :
@@ -351,7 +354,7 @@ def place_call_orders(flgMeanReversion=False):
     
         # rng = (dict_nifty_ce["r2"] - dict_nifty_ce["r1"])/2
         if dict_nifty_ce["s2"] <= last_price < dict_nifty_ce["s1"] :
-            place_order(tradingsymbol,qty,float(dict_nifty_ce["s1"]))
+            # place_order(tradingsymbol,qty,float(dict_nifty_ce["s1"]))
             place_order(tradingsymbol,qty,float(dict_nifty_ce["pp"]))
             place_order(tradingsymbol,qty,float(dict_nifty_ce["r1"]))
             place_order(tradingsymbol,qty,float(dict_nifty_ce["r2"]))
@@ -359,25 +362,25 @@ def place_call_orders(flgMeanReversion=False):
             place_order(tradingsymbol,qty,float(dict_nifty_ce["r4"]))
 
         elif dict_nifty_ce["s1"] <= last_price < dict_nifty_ce["pp"] :
-            place_order(tradingsymbol,qty,float(dict_nifty_ce["pp"]))
+            # place_order(tradingsymbol,qty,float(dict_nifty_ce["pp"]))
             place_order(tradingsymbol,qty,float(dict_nifty_ce["r1"]))
             place_order(tradingsymbol,qty,float(dict_nifty_ce["r2"]))
             place_order(tradingsymbol,qty,float(dict_nifty_ce["r3"]))
             place_order(tradingsymbol,qty,float(dict_nifty_ce["r4"]))
 
         elif dict_nifty_ce["pp"] <= last_price < dict_nifty_ce["r1"] :
-            place_order(tradingsymbol,qty,float(dict_nifty_ce["r1"]))
+            # place_order(tradingsymbol,qty,float(dict_nifty_ce["r1"]))
             place_order(tradingsymbol,qty,float(dict_nifty_ce["r2"]))
             place_order(tradingsymbol,qty,float(dict_nifty_ce["r3"]))
             place_order(tradingsymbol,qty,float(dict_nifty_ce["r4"]))
 
         elif dict_nifty_ce["r1"] <= last_price < dict_nifty_ce["r2"] :
-            place_order(tradingsymbol,qty,float(dict_nifty_ce["r2"]))
+            # place_order(tradingsymbol,qty,float(dict_nifty_ce["r2"]))
             place_order(tradingsymbol,qty,float(dict_nifty_ce["r3"]))
             place_order(tradingsymbol,qty,float(dict_nifty_ce["r4"]))
 
         elif dict_nifty_ce["r2"] <= last_price < dict_nifty_ce["r3"] :
-            place_order(tradingsymbol,qty,float(dict_nifty_ce["r3"]))
+            # place_order(tradingsymbol,qty,float(dict_nifty_ce["r3"]))
             place_order(tradingsymbol,qty,float(dict_nifty_ce["r4"]))
 
         else:
@@ -463,7 +466,14 @@ def process_orders(flg_place_call_orders=False):
                 # Square off only options
                 if tradingsymbol[-2:] in ('CE','PE') and (abs(qty)>0):
                     iLog(f"Placing Squareoff order for tradingsymbol={tradingsymbol}, qty={qty}",True)
-                    place_order(tradingsymbol,qty,kite.TRANSACTION_TYPE_BUY,kite.ORDER_TYPE_MARKET,None,"Algo")
+                    
+                    # Cancel any buy order already placed
+                    
+                    # place_order(tradingsymbol,qty,kite.TRANSACTION_TYPE_BUY,kite.ORDER_TYPE_MARKET,None,"Algo")
+                    place_order(tradingsymbol=tradingsymbol,qty=qty,
+                            transaction_type=kite.TRANSACTION_TYPE_BUY,
+                            order_type=kite.ORDER_TYPE_MARKET)
+
 
             iLog("All Positions Squared Off")
             # exit_algo()
@@ -564,34 +574,25 @@ while cur_HHMM > 914 and cur_HHMM < 1531:
     
     cur_min = datetime.datetime.now().minute 
     
-    # iLog(f"cur_min={cur_min}",flush=True)
-    # Below if block will run after every time interval specifie in the .ini file. Used fo OHLC calculation if needed
-    if( cur_min % interval == 0 and previous_min != cur_min):
-        previous_min = cur_min     # Set the minute flag to run the code only once post the interval
-        t1 = time.time()      # Set timer to record the processing time of all the indicators
+    t1 = time.time()
 
-        if stratgy1_entry_time == cur_HHMM and stratgy1_flg == False:
-            stratgy1_flg = True
-            process_orders(True)    # Place CE orders if required which should be done at 10.30 AM or so
-        else:
-            process_orders()
+    if stratgy1_entry_time == cur_HHMM and stratgy1_flg == False:
+        stratgy1_flg = True
+        process_orders(True)    # Place CE orders if required which should be done at 10.30 AM or so
+    else:
+        process_orders()
 
-        # Find processing time and Log only if processing takes more than 2 seconds
-        t2 = time.time() - t1
-        iLog(f"Processing Time(secs) = {t2:.2f}",True)
-        # iLog(f"previous_min={previous_min} cur_min={cur_min} cur_HHMM={cur_HHMM} : Processing Time={t2:.2f}")
-        if t2 > 2.0: 
-            iLog(f"Alert! Increased Processing time(secs) = {t2:.2f}",True)
+    # Find processing time and Log only if processing takes more than 2 seconds
+    t2 = time.time() - t1
+    iLog(f"Processing Time(secs) = {t2:.2f}",True)
+    # iLog(f"previous_min={previous_min} cur_min={cur_min} cur_HHMM={cur_HHMM} : Processing Time={t2:.2f}")
+    if t2 > 2.0: 
+        iLog(f"Alert! Increased Processing time(secs) = {t2:.2f}",True)
 
-
-    # # Run short strangle strategy
-    # if (cur_HHMM > short_strangle_time & short_strangle_flag == False):
-    #     short_strangle_flag = True
-    #     iLog("In Short Strangle condition.")
 
     cur_HHMM = int(datetime.datetime.now().strftime("%H%M"))
 
-    time.sleep(10)   # reduce to accomodate the processing delay, if any
+    time.sleep(interval)   # Process the loop after every n seconds
 
     # print(".",end="",flush=True)    
 
