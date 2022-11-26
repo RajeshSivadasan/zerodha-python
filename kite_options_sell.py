@@ -104,7 +104,7 @@ short_strangle_time = int(cfg.get("info", "short_strangle_time"))   # 925
 short_strangle_flag = False
 
 # Time interval in seconds. Order processing happens after every interval seconds
-interval = int(cfg.get("info", "interval"))   # 30
+interval_seconds = int(cfg.get("info", "interval_seconds"))   # 30
 
 # profit target percentage of the utilised margin
 profit_target_perc = float(cfg.get("info", "profit_target_perc"))  # 0.1 
@@ -130,7 +130,7 @@ virtual_trade = int(cfg.get("info", "virtual_trade"))   # 0 = Disabled - Trades 
 multi_user_list = list(eval(cfg.get("info", "multi_user_list")))
 
 
-all_variables = f"INI_FILE={INI_FILE} interval={interval} profit_target_perc={profit_target_perc} loss_limit_perc={loss_limit_perc}"\
+all_variables = f"INI_FILE={INI_FILE} interval_seconds={interval_seconds} profit_target_perc={profit_target_perc} loss_limit_perc={loss_limit_perc}"\
     f" stratgy1_entry_time={stratgy1_entry_time} nifty_opt_base_lot={nifty_opt_base_lot}"\
     f" nifty_ce_max_price_limit={nifty_ce_max_price_limit} nifty_pe_max_price_limit={nifty_pe_max_price_limit} \n***virtual_trade={virtual_trade}"
 
@@ -359,79 +359,40 @@ def place_call_orders(kiteuser,flgMeanReversion=False):
     tradingsymbol = dict_nifty_ce["tradingsymbol"]
     qty = nifty_opt_base_lot * nifty_opt_per_lot_qty
 
-    if flgMeanReversion:
-        # Place far pivot orders only
-        # Qty needs to be increased with each resistance level 
-        iLog(f"[{kiteuser.user_id}] Placing orders for Mean Reversion")
-        # rng = (dict_nifty_ce["r2"] - dict_nifty_ce["r1"])/2
-        if dict_nifty_ce["s2"] <= last_price < dict_nifty_ce["s1"] :
-            #place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["s1"]))
-            #place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["pp"]))
-            #place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r1"]))
-           place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r2"]))
-           place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r3"]))
-           place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r4"]))
+ 
+    # rng = (dict_nifty_ce["r2"] - dict_nifty_ce["r1"])/2
+    if dict_nifty_ce["s2"] <= last_price < dict_nifty_ce["s1"] :
+        #place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["s1"]))
+        place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["pp"]))
+        place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r1"]))
+        place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r2"]))
+        place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r3"]))
+        place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r4"]))
 
-        elif dict_nifty_ce["s1"] <= last_price < dict_nifty_ce["pp"] :
-            #place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["pp"]))
-            #place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r1"]))
-            #place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r2"]))
-           place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r3"]))
-           place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r4"]))
+    elif dict_nifty_ce["s1"] <= last_price < dict_nifty_ce["pp"] :
+        #place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["pp"]))
+        place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r1"]))
+        place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r2"]))
+        place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r3"]))
+        place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r4"]))
 
-        elif dict_nifty_ce["pp"] <= last_price < dict_nifty_ce["r1"] :
-            #place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r1"]))
-            #place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r2"]))
-           place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r3"]))
-           place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r4"]))
+    elif dict_nifty_ce["pp"] <= last_price < dict_nifty_ce["r1"] :
+        #place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r1"]))
+        place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r2"]))
+        place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r3"]))
+        place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r4"]))
 
-        elif dict_nifty_ce["r1"] <= last_price < dict_nifty_ce["r2"] :
-            #place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r2"]))
-           place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r3"]))
-           place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r4"]))
+    elif dict_nifty_ce["r1"] <= last_price < dict_nifty_ce["r2"] :
+        #place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r2"]))
+        place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r3"]))
+        place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r4"]))
 
-        elif dict_nifty_ce["r2"] <= last_price < dict_nifty_ce["r3"] :
-            #place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r3"]))
-           place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r4"]))
+    elif dict_nifty_ce["r2"] <= last_price < dict_nifty_ce["r3"] :
+        #place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r3"]))
+        place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r4"]))
 
-        else:
-            iLog(f"[{kiteuser.user_id}] Unable to find pivots and place order for {tradingsymbol}")
-        
     else:
-    
-        # rng = (dict_nifty_ce["r2"] - dict_nifty_ce["r1"])/2
-        if dict_nifty_ce["s2"] <= last_price < dict_nifty_ce["s1"] :
-            #place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["s1"]))
-           place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["pp"]))
-           place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r1"]))
-           place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r2"]))
-           place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r3"]))
-           place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r4"]))
-
-        elif dict_nifty_ce["s1"] <= last_price < dict_nifty_ce["pp"] :
-            #place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["pp"]))
-           place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r1"]))
-           place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r2"]))
-           place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r3"]))
-           place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r4"]))
-
-        elif dict_nifty_ce["pp"] <= last_price < dict_nifty_ce["r1"] :
-            #place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r1"]))
-           place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r2"]))
-           place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r3"]))
-           place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r4"]))
-
-        elif dict_nifty_ce["r1"] <= last_price < dict_nifty_ce["r2"] :
-            #place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r2"]))
-           place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r3"]))
-           place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r4"]))
-
-        elif dict_nifty_ce["r2"] <= last_price < dict_nifty_ce["r3"] :
-            #place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r3"]))
-           place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r4"]))
-
-        else:
-            iLog(f"[{kiteuser.user_id}] Unable to find pivots and place order for {tradingsymbol}")
+        iLog(f"[{kiteuser.user_id}] Unable to find pivots and place order for {tradingsymbol}")
 
 
 def runShortStrangle():
@@ -474,7 +435,7 @@ def process_orders(kiteuser=kite,flg_place_call_orders=False):
     # 1. Check existing positions if any
     # 2. If no positions get next week expiry and place orders (check if orders already exists) based on pivot points
     # 3. If existing position, place orders for existing position if not already present
-    #       Might need to manage  
+    #       
 
     iLog(f"[{kiteuser.user_id}] In process_orders():")
 
@@ -626,7 +587,7 @@ get_options()
 
 cur_HHMM = int(datetime.datetime.now().strftime("%H%M"))
 previous_min = 0
-iLog(f"Processing in {interval} seconds interval loop... {cur_HHMM}",True)
+iLog(f"Processing in {interval_seconds} seconds interval loop... {cur_HHMM}",True)
 
 stratgy1_flg = False
 
@@ -657,7 +618,7 @@ while cur_HHMM > 914 and cur_HHMM < 1531:
 
     cur_HHMM = int(datetime.datetime.now().strftime("%H%M"))
 
-    time.sleep(interval)   # Process the loop after every n seconds
+    time.sleep(interval_seconds)   # Process the loop after every n seconds
 
     # print(".",end="",flush=True)    
 
