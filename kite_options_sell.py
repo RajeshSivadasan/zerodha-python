@@ -77,7 +77,7 @@ if not os.path.exists("./log"):
 # Initialise logging and set console and error target as log file
 LOG_FILE = r"./log/kite_options_sell_" + datetime.datetime.now().strftime("%Y%m%d") +".log"
 # Uncomment below code to get the logs into the logfile 
-# sys.stdout = sys.stderr = open(LOG_FILE, "a") # use flush=True parameter in print statement if values are not seen in log file
+sys.stdout = sys.stderr = open(LOG_FILE, "a") # use flush=True parameter in print statement if values are not seen in log file
 
 
 
@@ -400,7 +400,6 @@ def place_option_orders(kiteuser,flgMeanReversion=False,flgPlaceSelectedOptionOr
                 place_option_orders_CEPE(kiteuser,flgMeanReversion,dict_nifty_pe)
 
 
-
 def place_option_orders_CEPE(kiteuser,flgMeanReversion,dict_opt):
     '''
     Called from place_option_orders(). All arguments are mandatory.
@@ -512,6 +511,7 @@ def place_order(kiteuser,tradingsymbol,qty,limit_price=None,transaction_type=kit
     
     except Exception as e:
         iLog(f"[{kiteuser.user_id}] place_order(): Error placing order. {e}",True)
+        return False
 
 
 def process_orders(kiteuser=kite,flg_place_orders=False):
@@ -566,12 +566,11 @@ def process_orders(kiteuser=kite,flg_place_orders=False):
                 
                 # Square off only options
                 if tradingsymbol[-2:] in ('CE','PE') and (abs(qty)>0):
-                    iLog(f"[{kiteuser.user_id}] (Disabled) Placing Squareoff order for tradingsymbol={tradingsymbol}, qty={qty}",True)
+                    iLog(f"[{kiteuser.user_id}] Placing Squareoff order for tradingsymbol={tradingsymbol}, qty={qty}",True)
                     
                     # Cancel any buy order already placed
                     
-                    #place_order(kiteuser,tradingsymbol,qty,kite.TRANSACTION_TYPE_BUY,kite.ORDER_TYPE_MARKET,None,"Algo")
-                    # place_order(kiteuser,tradingsymbol=tradingsymbol,qty=qty, transaction_type=kite.TRANSACTION_TYPE_BUY, order_type=kite.ORDER_TYPE_MARKET)
+                    place_order(kiteuser,tradingsymbol=tradingsymbol,qty=qty, transaction_type=kite.TRANSACTION_TYPE_BUY, order_type=kite.ORDER_TYPE_MARKET)
 
 
             iLog(f"[{kiteuser.user_id}] All Positions Squared Off")
@@ -660,12 +659,6 @@ def exit_algo():
 
 get_options()
 
-# ====== Start Test
-for kiteuser in kite_users:
-    process_orders(kiteuser,True)
-# ====== End Test
-
-
 cur_HHMM = int(datetime.datetime.now().strftime("%H%M"))
 previous_min = 0
 iLog(f"Processing in {interval_seconds} seconds interval loop... {cur_HHMM}",True)
@@ -706,4 +699,4 @@ while cur_HHMM > 914 and cur_HHMM < 1531:
 
 iLog(f"====== End of Algo ====== @ {datetime.datetime.now()}",True)
 
-# exit_algo()
+#1
