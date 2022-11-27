@@ -77,7 +77,7 @@ if not os.path.exists("./log"):
 # Initialise logging and set console and error target as log file
 LOG_FILE = r"./log/kite_options_sell_" + datetime.datetime.now().strftime("%Y%m%d") +".log"
 # Uncomment below code to get the logs into the logfile 
-sys.stdout = sys.stderr = open(LOG_FILE, "a") # use flush=True parameter in print statement if values are not seen in log file
+# sys.stdout = sys.stderr = open(LOG_FILE, "a") # use flush=True parameter in print statement if values are not seen in log file
 
 
 
@@ -217,9 +217,8 @@ nifty_atm = round(int(nifty_ltp),-2)
 
 # Prepare the list of option stikes for entry 
 #--------------------------------------------
-# Get list of +- 500 stikes to filter the required price range strike
-# Get list of CE/PE rounded strikes 600 pts on either side of the ATM from option chain
-lst_nifty_opt = df[(df.name=='NIFTY') & ((df.strike>=nifty_atm-600) & (df.strike<=nifty_atm+600)) & (df.strike%100==0) ].tradingsymbol.apply(lambda x:'NFO:'+x).tolist()
+# Get list of CE/PE strikes 600 pts on either side of the ATM from option chain # & (df.strike%100==0)
+lst_nifty_opt = df[(df.name=='NIFTY') & ((df.strike>=nifty_atm-600) & (df.strike<=nifty_atm+600)) ].tradingsymbol.apply(lambda x:'NFO:'+x).tolist()
 df = []
 
 
@@ -227,8 +226,7 @@ df = []
 # Dictionary to store single row of call /  put option details
 dict_nifty_ce = {}
 dict_nifty_pe = {}
-
-
+dict_nifty_opt_selected = {} # for storing the details of existing option position which needs reversion
 
 # # Declare Class for users
 # class MyUsers:
@@ -282,7 +280,7 @@ def get_options(instrument_token=None):
     Gets the call and put option in the global df objects (dict_nifty_ce, df_instrument_nifty_opt_pe) 
     for the required strike as per the parameters and and calculates pivot points for entry and exit
     '''
-    global dict_nifty_ce, dict_nifty_pe
+    global dict_nifty_ce, dict_nifty_pe, dict_nifty_opt_selected
 
     iLog(f"In get_options(): instrument_token={instrument_token}")
   
@@ -297,107 +295,194 @@ def get_options(instrument_token=None):
 
 
     if instrument_token is None:
-        # If no istrument token passed then get default options
+        # Check if we can use Dask to parallelise the operations
+        # If no istrument token passed then get default options for both CE and PE
         # Get the CE/PE instrument data(instrument_token,last_price,type,symbol) where last_price is maximum but less than equal to option max price limit (e.g <=200)
         df_nifty_opt_ce = df_nifty_opt[(df_nifty_opt.type=='CE') & (df_nifty_opt.last_price==df_nifty_opt[(df_nifty_opt.type=='CE') & (df_nifty_opt.last_price<=nifty_ce_max_price_limit)].last_price.max())]
         df_nifty_opt_pe = df_nifty_opt[(df_nifty_opt.type=='PE') & (df_nifty_opt.last_price==df_nifty_opt[(df_nifty_opt.type=='PE') & (df_nifty_opt.last_price<=nifty_pe_max_price_limit)].last_price.max())]
     
+        iLog(f"Call selected is : {df_nifty_opt_ce.tradingsymbol[-1]}({df_nifty_opt_ce.instrument_token[-1]}) last_price = {df_nifty_opt_ce.last_price[-1]}")
+        iLog(f"Put  selected is : {df_nifty_opt_pe.tradingsymbol[-1]}({df_nifty_opt_pe.instrument_token[-1]}) last_price = {df_nifty_opt_pe.last_price[-1]}")
+
+        # Get CE Pivot Points
+        instrument_token = str(df_nifty_opt_ce.instrument_token[-1])
+        dict_pivot = get_pivot_points(instrument_token)
+        if dict_pivot:
+            dict_nifty_ce = dict_pivot
+            # update the ltp and tradingsymbol
+            dict_nifty_ce["last_price"] = kite.ltp(instrument_token)[instrument_token]['last_price']
+            dict_nifty_ce["tradingsymbol"] = df_nifty_opt_ce.tradingsymbol[-1]
+            # iLog("dict_nifty_ce:=",dict_nifty_ce)
+
+        else:
+            iLog(f"Unable to get Pivot points for CE {instrument_token}")
+
+        
+        
+        # Get PE Pivot Points
+        instrument_token = str(df_nifty_opt_pe.instrument_token[-1])
+        dict_pivot = get_pivot_points(instrument_token)
+        if dict_pivot:
+            dict_nifty_pe = dict_pivot
+            # update the ltp and tradingsymbol
+            dict_nifty_pe["last_price"] = kite.ltp(instrument_token)[instrument_token]['last_price']
+            dict_nifty_pe["tradingsymbol"] = df_nifty_opt_pe.tradingsymbol[-1]
+            # iLog("dict_nifty_ce:=",dict_nifty_ce)
+
+        else:
+            iLog(f"Unable to get Pivot points for PE {instrument_token}")
+
+
+    
     else:
-        df_nifty_opt_ce = df_nifty_opt[df_nifty_opt.instrument_token==instrument_token]
+        df_nifty_opt_selected = df_nifty_opt[df_nifty_opt.instrument_token==instrument_token]
+
+        iLog(f"Call/Put selected is : {df_nifty_opt_selected.tradingsymbol[-1]}({df_nifty_opt_selected.instrument_token[-1]}) last_price = {df_nifty_opt_selected.last_price[-1]}")
+
+        instrument_token = str(df_nifty_opt_selected.instrument_token[-1])
+        dict_pivot = get_pivot_points(instrument_token)
+        if dict_pivot:
+            dict_nifty_opt_selected = dict_pivot
+            # update the ltp and tradingsymbol
+            dict_nifty_opt_selected["last_price"] = kite.ltp(instrument_token)[instrument_token]['last_price']
+            dict_nifty_opt_selected["tradingsymbol"] = df_nifty_opt_selected.tradingsymbol[-1]
+            # iLog("dict_nifty_ce:=",dict_nifty_ce)
+        
+        else:
+            iLog(f"Unable to get Pivot points for selected CE/PE  {instrument_token}")
 
 
-
-    iLog(f"Call selected is : {df_nifty_opt_ce.tradingsymbol[-1]}({df_nifty_opt_ce.instrument_token[-1]}) last_price = {df_nifty_opt_ce.last_price[-1]}")
-    # iLog(f"Put  selected is : {df_nifty_opt_pe.tradingsymbol[-1]}({df_nifty_opt_pe.instrument_token[-1]}) last_price = {df_nifty_opt_pe.last_price[-1]}")
-
-    
-    # Get CE instrument token (instrument_token)
-    instrument_token_ce = str(df_nifty_opt_ce.instrument_token[-1])
-    instrument_token = instrument_token_ce
-    
-    # Get PE instrument token (instrument_token)
-    # instrument_token_pe = str(df_nifty_opt_pe.instrument_token[-1])
-    
-    
-    # Check if we can use Dask to parallelise the operations
-    # Get pivot points for the selected instrument
-    dict_pivot = get_pivot_points(instrument_token)
-
-    # iLog("dict_pivot=",dict_pivot)
-
-    if dict_pivot:
-        dict_nifty_ce = dict_pivot
-        # update the ltp and tradingsymbol
-        dict_nifty_ce["last_price"] = kite.ltp(instrument_token_ce)[instrument_token_ce]['last_price']
-        dict_nifty_ce["tradingsymbol"] = df_nifty_opt_ce.tradingsymbol[-1]
-        # iLog("dict_nifty_ce:=",dict_nifty_ce)
-    
-    else:
-        iLog(f"Unable to get Pivot points for {instrument_token_ce}")
-    
-
-def place_call_orders(kiteuser,flgMeanReversion=False):
-    ''' Place call orders and targets based on pivots/levels '''
+def place_option_orders(kiteuser,flgMeanReversion=False,flgPlaceSelectedOptionOrder=False):
+    ''' Place call orders and targets based on pivots/levels if no order exists'''
 
     iLog(f"[{kiteuser.user_id}] In place_call_orders():")
 
+    
     # Get open orders
     df_orders = pd.DataFrame(kiteuser.orders())
     
-    # Exit if there are already open orders 
+    
     if df_orders.empty:
-        pass
+        # Place both CE and PE orders if order is empty 
+        # Place Call orders
+        place_option_orders_CEPE(kiteuser,flgMeanReversion,dict_nifty_ce)
+        # Place Put orders
+        place_option_orders_CEPE(kiteuser,flgMeanReversion,dict_nifty_pe)
     
     else:
-        # We can check if orders of the existing positions are there or not
-        if sum(df_orders.status=='OPEN') > 0: 
-            iLog(f"[{kiteuser.user_id}] Open Orders found. No orders will be placed.")
-            # iLog(df_orders)
-            return
+        if flgPlaceSelectedOptionOrder:
+            tradingsymbol = dict_nifty_opt_selected["tradingsymbol"]
+            if sum((df_orders.status=='OPEN') & (df_orders.transaction_type=='SELL') & (df_orders.tradingsymbol==tradingsymbol)) > 0:
+                
+                iLog(f"[{kiteuser.user_id}] In place_call_orders(): Existing order found for {tradingsymbol}")
+                return
+            else:
+                # Place orders for selected option
+                place_option_orders_CEPE(kiteuser,flgMeanReversion,dict_nifty_opt_selected) 
+        else:
+            # Check existing orders for CE as well as PE and place orders accordingly
+            # There can be BUY orders as well
+            # Place CE orders if no existing orders are there
+            tradingsymbol = dict_nifty_ce["tradingsymbol"]
+            if sum((df_orders.status=='OPEN') & (df_orders.transaction_type=='SELL') & (df_orders.tradingsymbol==tradingsymbol)) > 0:
+                iLog(f"[{kiteuser.user_id}] Open Orders found for {tradingsymbol}. No orders will be placed.")
+                # iLog(df_orders)
+            else:
+                # Place Call orders
+                place_option_orders_CEPE(kiteuser,flgMeanReversion,dict_nifty_ce)
 
-    last_price = dict_nifty_ce["last_price"]
-    tradingsymbol = dict_nifty_ce["tradingsymbol"]
+            # Place PE orders if no existing orders are there
+            tradingsymbol = dict_nifty_pe["tradingsymbol"]
+            if sum((df_orders.status=='OPEN') & (df_orders.transaction_type=='SELL') & (df_orders.tradingsymbol==tradingsymbol)) > 0:
+                iLog(f"[{kiteuser.user_id}] Open Orders found for {tradingsymbol}. No orders will be placed.")
+            else:
+                # Place Put orders
+                place_option_orders_CEPE(kiteuser,flgMeanReversion,dict_nifty_pe)
+
+
+
+def place_option_orders_CEPE(kiteuser,flgMeanReversion,dict_opt):
+    '''
+    Called from place_option_orders(). All arguments are mandatory.
+    '''
+    iLog(f"[{kiteuser.user_id}] In place_option_orders_CEPE():")
+    
+    last_price = dict_opt["last_price"]
+    tradingsymbol = dict_opt["tradingsymbol"]
     qty = nifty_opt_base_lot * nifty_opt_per_lot_qty
 
- 
-    # rng = (dict_nifty_ce["r2"] - dict_nifty_ce["r1"])/2
-    if dict_nifty_ce["s2"] <= last_price < dict_nifty_ce["s1"] :
-        #place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["s1"]))
-        place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["pp"]))
-        place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r1"]))
-        place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r2"]))
-        place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r3"]))
-        place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r4"]))
 
-    elif dict_nifty_ce["s1"] <= last_price < dict_nifty_ce["pp"] :
-        #place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["pp"]))
-        place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r1"]))
-        place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r2"]))
-        place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r3"]))
-        place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r4"]))
+    if flgMeanReversion :
+        #Put orders for mean reversion for existing positions while addding new positions 
+        # rng = (dict_nifty_ce["r2"] - dict_nifty_ce["r1"])/2
+        if dict_opt["s2"] <= last_price < dict_opt["s1"] :
+            # place_order(kiteuser,tradingsymbol,qty,float(dict_opt["s1"]))
+            place_order(kiteuser,tradingsymbol,qty,float(dict_opt["pp"]))
+            place_order(kiteuser,tradingsymbol,qty,float(dict_opt["r1"]))
+            place_order(kiteuser,tradingsymbol,qty,float(dict_opt["r2"]))
+            place_order(kiteuser,tradingsymbol,qty,float(dict_opt["r3"]))
+            # place_order(kiteuser,tradingsymbol,qty,float(dict_opt["r4"]))
 
-    elif dict_nifty_ce["pp"] <= last_price < dict_nifty_ce["r1"] :
-        #place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r1"]))
-        place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r2"]))
-        place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r3"]))
-        place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r4"]))
+        elif dict_opt["s1"] <= last_price < dict_opt["pp"] :
+            # place_order(kiteuser,tradingsymbol,qty,float(dict_opt["pp"]))
+            place_order(kiteuser,tradingsymbol,qty,float(dict_opt["r1"]))
+            place_order(kiteuser,tradingsymbol,qty,float(dict_opt["r2"]))
+            place_order(kiteuser,tradingsymbol,qty,float(dict_opt["r3"]))
+            place_order(kiteuser,tradingsymbol,qty,float(dict_opt["r4"]))
 
-    elif dict_nifty_ce["r1"] <= last_price < dict_nifty_ce["r2"] :
-        #place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r2"]))
-        place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r3"]))
-        place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r4"]))
+        elif dict_opt["pp"] <= last_price < dict_opt["r1"] :
+            # place_order(kiteuser,tradingsymbol,qty,float(dict_opt["r1"]))
+            place_order(kiteuser,tradingsymbol,qty,float(dict_opt["r2"]))
+            place_order(kiteuser,tradingsymbol,qty,float(dict_opt["r3"]))
+            place_order(kiteuser,tradingsymbol,qty,float(dict_opt["r4"]))
 
-    elif dict_nifty_ce["r2"] <= last_price < dict_nifty_ce["r3"] :
-        #place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r3"]))
-        place_order(kiteuser,tradingsymbol,qty,float(dict_nifty_ce["r4"]))
+        elif dict_opt["r1"] <= last_price < dict_opt["r2"] :
+            # place_order(kiteuser,tradingsymbol,qty,float(dict_opt["r2"]))
+            place_order(kiteuser,tradingsymbol,qty,float(dict_opt["r3"]))
+            place_order(kiteuser,tradingsymbol,qty,float(dict_opt["r4"]))
+
+        elif dict_opt["r2"] <= last_price < dict_opt["r3"] :
+            # place_order(kiteuser,tradingsymbol,qty,float(dict_opt["r3"]))
+            place_order(kiteuser,tradingsymbol,qty,float(dict_opt["r4"]))
+
+        else:
+            iLog(f"[{kiteuser.user_id}] Unable to find pivots and place order for {tradingsymbol}")
 
     else:
-        iLog(f"[{kiteuser.user_id}] Unable to find pivots and place order for {tradingsymbol}")
+        # Regular orders for fresh positions or new position for next strike for mean reversion 
+        if dict_opt["s2"] <= last_price < dict_opt["s1"] :
+            place_order(kiteuser,tradingsymbol,qty,float(dict_opt["s1"]))
+            place_order(kiteuser,tradingsymbol,qty,float(dict_opt["pp"]))
+            place_order(kiteuser,tradingsymbol,qty,float(dict_opt["r1"]))
+            place_order(kiteuser,tradingsymbol,qty,float(dict_opt["r2"]))
+            place_order(kiteuser,tradingsymbol,qty,float(dict_opt["r3"]))
+            # place_order(kiteuser,tradingsymbol,qty,float(dict_opt["r4"]))
 
+        elif dict_opt["s1"] <= last_price < dict_opt["pp"] :
+            place_order(kiteuser,tradingsymbol,qty,float(dict_opt["pp"]))
+            place_order(kiteuser,tradingsymbol,qty,float(dict_opt["r1"]))
+            place_order(kiteuser,tradingsymbol,qty,float(dict_opt["r2"]))
+            place_order(kiteuser,tradingsymbol,qty,float(dict_opt["r3"]))
+            # place_order(kiteuser,tradingsymbol,qty,float(dict_opt["r4"]))
 
-def runShortStrangle():
-    '''Runs short strangle at a given price range'''
-    # Have to rethink about this strategy
+        elif dict_opt["pp"] <= last_price < dict_opt["r1"] :
+            place_order(kiteuser,tradingsymbol,qty,float(dict_opt["r1"]))
+            place_order(kiteuser,tradingsymbol,qty,float(dict_opt["r2"]))
+            place_order(kiteuser,tradingsymbol,qty,float(dict_opt["r3"]))
+            place_order(kiteuser,tradingsymbol,qty,float(dict_opt["r4"]))
+
+        elif dict_opt["r1"] <= last_price < dict_opt["r2"] :
+            place_order(kiteuser,tradingsymbol,qty,float(dict_opt["r2"]))
+            place_order(kiteuser,tradingsymbol,qty,float(dict_opt["r3"]))
+            place_order(kiteuser,tradingsymbol,qty,float(dict_opt["r4"]))
+
+        elif dict_opt["r2"] <= last_price < dict_opt["r3"] :
+            place_order(kiteuser,tradingsymbol,qty,float(dict_opt["r3"]))
+            place_order(kiteuser,tradingsymbol,qty,float(dict_opt["r4"]))
+
+        else:
+            iLog(f"[{kiteuser.user_id}] Unable to find pivots and place order for {tradingsymbol}")
+
 
 def place_order(kiteuser,tradingsymbol,qty,limit_price=None,transaction_type=kite.TRANSACTION_TYPE_SELL,order_type=kite.ORDER_TYPE_LIMIT,tag="Algo"):
     
@@ -429,11 +514,11 @@ def place_order(kiteuser,tradingsymbol,qty,limit_price=None,transaction_type=kit
         iLog(f"[{kiteuser.user_id}] place_order(): Error placing order. {e}",True)
 
 
-def process_orders(kiteuser=kite,flg_place_call_orders=False):
+def process_orders(kiteuser=kite,flg_place_orders=False):
     '''Check the status of orders/squareoff/add positions'''
     # FOr each users do the following:
     # 1. Check existing positions if any
-    # 2. If no positions get next week expiry and place orders (check if orders already exists) based on pivot points
+    # 2. If no positions get options and place orders (check if orders already exists) based on pivot points
     # 3. If existing position, place orders for existing position if not already present
     #       
 
@@ -444,7 +529,7 @@ def process_orders(kiteuser=kite,flg_place_call_orders=False):
 
     # Check MTM price with the actual on portal
     df_pos = get_positions(kiteuser)
-    iLog(f"df_pos={df_pos}")
+    # iLog(f"df_pos={df_pos}")
     
     pos = min(df_pos.quantity)
     # Check if there are no open positions
@@ -453,10 +538,10 @@ def process_orders(kiteuser=kite,flg_place_call_orders=False):
         pass
 
     elif pos == 0:
-        if flg_place_call_orders:
+        if flg_place_orders:
             iLog(f"[{kiteuser.user_id}] No Positions found. New orders will be placed")
             get_options()                   # Refresh call and put to be traded into the global variables
-            place_call_orders(kiteuser)     # Place orders as per the stratefy designated time in the parameter 
+            place_option_orders(kiteuser)   # Place orders as per the stratefy designated time in the parameter 
         else:
             iLog(f"[{kiteuser.user_id}] No Positions found. New orders will NOT be placed as strategy1 time {stratgy1_entry_time} not met.")
     else:
@@ -505,10 +590,16 @@ def process_orders(kiteuser=kite,flg_place_call_orders=False):
                         iLog(f"[{kiteuser.user_id}] Apply Mean Reversion orders if not already present")
                 
                 iLog(f"[{kiteuser.user_id}] Checking existing positions and applying Mean Reversion orders if not already present")
+                
                 # Place mean reversion orders for the current positions irrespective of profit target achieved
                 for opt in df_pos.itertuples():
-                    get_options(opt.instrument_token)
-                    place_call_orders(kiteuser,True)
+                    iLog(f"[{kiteuser.user_id}] opt.tradingsymbol={opt.tradingsymbol} opt.mtm={opt.mtm}")
+                    if opt.mtm<100:
+                        get_options(opt.instrument_token)
+                        if flg_place_orders:
+                            place_option_orders(kiteuser,True)
+                        else:
+                            iLog(f"[{kiteuser.user_id}] Mean reversion orders will NOT be placed as flg_place_orders is false")
 
 
 def get_positions(kiteuser):
@@ -554,24 +645,9 @@ def exit_algo():
     sys.stderr = sys.__stderr__
     sys.exit(0)
 
-#######################
-######   TESTING   ####
 
-# symbol='NIFTY22OCT17600CE'
-# qty=50
-# limit_price=300.0
-# tag='STRADDLE_ORD'
-
-# order_id=kite.place_order(variety=kite.VARIETY_REGULAR,exchange=kite.EXCHANGE_NFO,tradingsymbol=symbol,
-#     transaction_type=kite.TRANSACTION_TYPE_SELL,quantity=qty,
-#     product=kite.PRODUCT_NRML,order_type=kite.ORDER_TYPE_LIMIT,price=limit_price,validity=kite.VALIDITY_DAY,tag=tag)
-
-# iLog(f"Order Placed. order_id={order_id}")
-
-
-######## Strategy 1: Sell both CE and PE @<=100
-# No SL, Mean reversion for leg with -ve MTM
-# Place 
+######## Strategy 1: Sell both CE and PE @<=51
+# No SL, only Mean reversion(averaging) to be appied for leg with -ve MTM
 
 # Mean reversion for leg with -ve MTM
 # -----------------------------------
@@ -583,6 +659,11 @@ def exit_algo():
 ######## Strategy 2: Sell CE at pivot resistance points , R2(qty=baselot) , R3(qty=baselot*2), R3(qty=baselot*3)
 
 get_options()
+
+# ====== Start Test
+for kiteuser in kite_users:
+    process_orders(kiteuser,True)
+# ====== End Test
 
 
 cur_HHMM = int(datetime.datetime.now().strftime("%H%M"))
